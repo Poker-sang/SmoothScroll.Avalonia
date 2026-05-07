@@ -298,6 +298,18 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     [GeneratedStyledProperty]
     public partial ScrollContentOrientation ContentOrientation { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value that determines how manipulation input influences scrolling behavior on the horizontal axis.
+    /// </summary>
+    [GeneratedStyledProperty(ScrollMode.Auto)]
+    public partial ScrollMode HorizontalScrollMode { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value that determines how manipulation input influences scrolling behavior on the vertical axis.
+    /// </summary>
+    [GeneratedStyledProperty(ScrollMode.Auto)]
+    public partial ScrollMode VerticalScrollMode { get; set; }
+
     /// <inheritdoc/>
     Control? IScrollAnchorProvider.CurrentAnchor
     {
@@ -418,52 +430,51 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         return res;
     }
 
-    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnAttachedToVisualTree(e);
-        AttachToScrollViewer();
-
-        if (Child?.IsAttachedToVisualTree() == true)
-            Initialize();
-        else
-            Child?.AttachedToVisualTree += OnChildAttachedToVisualTree;
-    }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        var compositionVisual = GetCompositionVisual();
         base.OnDetachedFromVisualTree(e);
-        Child?.AttachedToVisualTree -= OnChildAttachedToVisualTree;
         StopArrangeTimer();
-        _interactionTracker?.Dispose();
-        _interactionTracker = null;
-        _interactionSource?.Dispose();
-        _interactionSource = null;
-        _animationGroup?.Dispose();
-        _animationGroup = null;
+        ClearScrollAnimation(compositionVisual);
     }
 
-    private void OnChildAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    protected override void OnLoaded(RoutedEventArgs e)
     {
+        AttachToScrollViewer();
         Initialize();
+        base.OnLoaded(e);
     }
 
     private void Initialize()
     {
         InitializeInteractionTracker();
-        // HACK: We must set ServerObject's scale manually as it's default value is 0.
-        // Otherwise, the visual will be invisible.
-        var childVisual = GetCompositionVisual();
-        var scale = new Vector3D(_interactionTracker!.Scale, _interactionTracker.Scale, _interactionTracker.Scale);
-
-        // This directly access Server side object from UI thread, which is usually considered not safe
-        // however this should be fine as it is before the composition activated / animations running.
-        childVisual!.Server.Scale = scale;
         EnsureScrollAnimation();
     }
 
     private void InitializeInteractionTracker()
     {
         var compositionVisual = GetCompositionVisual();
+        if (compositionVisual is null)
+        {
+            return;
+        }
+
+        if (_interactionTracker is not null)
+        {
+            if (_interactionTracker.Compositor != compositionVisual.Compositor)
+            {
+                DisposeInteractionTracker();
+            }
+            else
+            {
+                _interactionTracker.MinScale = MinZoomFactor;
+                _interactionTracker.MaxScale = MaxZoomFactor;
+                UpdateInteractionOptions();
+                return;
+            }
+        }
+
         var scrollableArea = CalculateScrollableArea(ZoomFactor);
         var initialPosition = Vector3D.Clamp(
             new Vector3D(Offset.X, Offset.Y, 0),
@@ -479,7 +490,6 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         {
             _compositionUpdate = true;
             _scaleChanged = !MathUtilities.AreClose(ZoomFactor, 1.0);
-            ApplyScrollableArea(scrollableArea);
         }
         finally
         {
@@ -488,6 +498,14 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         }
 
         UpdateInteractionOptions();
+    }
+
+    private void DisposeInteractionTracker()
+    {
+        _interactionSource?.Dispose();
+        _interactionSource = null;
+        _interactionTracker?.Dispose();
+        _interactionTracker = null;
     }
 
     /// <summary>
@@ -516,10 +534,10 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         _ownerSubscriptions?.Dispose();
         _owner = owner;
 
-        var subscriptionDisposables = new IDisposable?[]
+        IDisposable?[] subscriptionDisposables = new IDisposable?[]
         {
-            IfUnset(CanHorizontallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.HorizontalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
-            IfUnset(CanVerticallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.VerticalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
+            owner is ScrollView ? null : IfUnset(CanHorizontallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.HorizontalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
+            owner is ScrollView ? null : IfUnset(CanVerticallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.VerticalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
             IfUnset(OffsetProperty, p => Bind(p, owner.GetBindingObservable(ScrollViewer.OffsetProperty), BindingPriority.Template)),
             IfUnset(HorizontalContentAlignmentProperty, p => Bind(p, owner.GetBindingObservable(ContentControl.HorizontalContentAlignmentProperty), BindingPriority.Template)),
             IfUnset(VerticalContentAlignmentProperty, p => Bind(p, owner.GetBindingObservable(ContentControl.VerticalContentAlignmentProperty), BindingPriority.Template)),
@@ -569,10 +587,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         }
 
         var availableWithPadding = availableSize.Deflate(Padding);
-        var constraint = IsZoomEnabled
-            ? new Size(double.PositiveInfinity, double.PositiveInfinity)
-            : new Size(
-            ContentOrientation is ScrollContentOrientation.Horizontal or ScrollContentOrientation.Both 
+        var constraint = new Size(
+            ContentOrientation is ScrollContentOrientation.Horizontal or ScrollContentOrientation.Both
                 ? double.PositiveInfinity : availableWithPadding.Width,
             ContentOrientation is ScrollContentOrientation.Vertical or ScrollContentOrientation.Both
                 ? double.PositiveInfinity : availableWithPadding.Height);
@@ -605,6 +621,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         {
             double width = 0;
             double height = 0;
+            GetComputedScrollMode(finalSize);
             if (IsZoomEnabled)
             {
                 width = (HorizontalContentAlignment == HorizontalAlignment.Stretch) ?
@@ -666,20 +683,14 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             }
             else
             {
-                if (IsZoomEnabled)
-                {
-                    ArrangeOverrideImpl(size, -Offset - new Point(_interactionTracker.Position.X, _interactionTracker.Position.Y));
-                }
-                else
-                {
-                    ArrangeOverrideImpl(size, -Offset);
-                }
+                ArrangeOverrideImpl(size, -Offset);
             }
 
             Viewport = finalSize;
             _isAnchorElementDirty = true;
 
-            UpdateScrollableAreaForScale(_interactionTracker?.Scale ?? 1.0);
+            ApplyScrollableArea(CalculateScrollableArea(ZoomFactor));
+            SynchronizeCompositionVisualBeforeFirstAnimation();
         }
         finally
         {
@@ -748,6 +759,35 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         }
     }
 
+    private void GetComputedScrollMode(Size finalSize)
+    {
+        if (IsZoomEnabled)
+        {
+            SetCurrentValue(CanHorizontallyScrollProperty, true);
+            SetCurrentValue(CanVerticallyScrollProperty, true);
+            return;
+        }
+        var scrollableWidth = Math.Max(0, Child.DesiredSize.Width - finalSize.Width);
+        var scrollHeight = Math.Max(0, Child.DesiredSize.Height - finalSize.Height);
+        if (HorizontalScrollMode == ScrollMode.Enabled
+            || (HorizontalScrollMode == ScrollMode.Auto && scrollableWidth > 0))
+        {
+            SetCurrentValue(CanHorizontallyScrollProperty, true);
+        }
+        else
+        {
+            SetCurrentValue(CanHorizontallyScrollProperty, false);
+        }
+        if (VerticalScrollMode == ScrollMode.Enabled
+            || (VerticalScrollMode == ScrollMode.Auto && scrollHeight > 0))
+        {
+            SetCurrentValue(CanVerticallyScrollProperty, true);
+        }
+        else
+        {
+            SetCurrentValue(CanVerticallyScrollProperty, false);
+        }
+    }
 
     partial void OnPropertyChangedOverride(AvaloniaPropertyChangedEventArgs change)
     {
@@ -799,7 +839,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         }
         else if (change.Property == PaddingProperty)
         {
-            _animationGroup = null;
+            ClearScrollAnimation(GetCompositionVisual());
             EnsureScrollAnimation();
         }
         else if (change.Property == ScrollFeaturesProperty ||
@@ -840,6 +880,15 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     private void ChildChanged(AvaloniaPropertyChangedEventArgs e)
     {
+        if (e.OldValue is Control oldChild)
+        {
+            ClearScrollAnimation(ElementComposition.GetElementVisual(oldChild));
+        }
+        else
+        {
+            ClearScrollAnimation(GetCompositionVisual());
+        }
+
         if (e.OldValue is not null)
         {
             SetCurrentValue(OffsetProperty, default);
@@ -897,7 +946,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         // If we have an anchor and its position relative to Child has changed during the
         // arrange then that change wasn't just due to scrolling (as scrolling doesn't adjust
         // relative positions within Child).
-        if (_anchorElement != null &&
+        if (_anchorElement is not null &&
             TranslateBounds(_anchorElement, Child!, out var updatedBounds) &&
             updatedBounds.Position != _anchorElementBounds.Position)
         {
@@ -952,30 +1001,30 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     {
         var scrollable = GetScrollSnapPointsInfo(Content);
 
-        if (scrollable is IScrollSnapPointsInfo scrollSnapPointsInfo)
+        if (scrollable is not null)
         {
-            _areVerticalSnapPointsRegular = scrollSnapPointsInfo.AreVerticalSnapPointsRegular;
-            _areHorizontalSnapPointsRegular = scrollSnapPointsInfo.AreHorizontalSnapPointsRegular;
+            _areVerticalSnapPointsRegular = scrollable.AreVerticalSnapPointsRegular;
+            _areHorizontalSnapPointsRegular = scrollable.AreHorizontalSnapPointsRegular;
 
             if (!_areVerticalSnapPointsRegular)
             {
-                _verticalSnapPoints = scrollSnapPointsInfo.GetIrregularSnapPoints(Orientation.Vertical, VerticalSnapPointsAlignment);
+                _verticalSnapPoints = scrollable.GetIrregularSnapPoints(Orientation.Vertical, VerticalSnapPointsAlignment);
             }
             else
             {
                 _verticalSnapPoints = new List<double>();
-                _verticalSnapPoint = scrollSnapPointsInfo.GetRegularSnapPoints(Orientation.Vertical, VerticalSnapPointsAlignment, out _verticalSnapPointOffset);
+                _verticalSnapPoint = scrollable.GetRegularSnapPoints(Orientation.Vertical, VerticalSnapPointsAlignment, out _verticalSnapPointOffset);
 
             }
 
             if (!_areHorizontalSnapPointsRegular)
             {
-                _horizontalSnapPoints = scrollSnapPointsInfo.GetIrregularSnapPoints(Orientation.Horizontal, HorizontalSnapPointsAlignment);
+                _horizontalSnapPoints = scrollable.GetIrregularSnapPoints(Orientation.Horizontal, HorizontalSnapPointsAlignment);
             }
             else
             {
                 _horizontalSnapPoints = new List<double>();
-                _horizontalSnapPoint = scrollSnapPointsInfo.GetRegularSnapPoints(Orientation.Horizontal, HorizontalSnapPointsAlignment, out _horizontalSnapPointOffset);
+                _horizontalSnapPoint = scrollable.GetRegularSnapPoints(Orientation.Horizontal, HorizontalSnapPointsAlignment, out _horizontalSnapPointOffset);
             }
         }
         else
@@ -1158,6 +1207,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
         var position = new Vector(args.Position.X, args.Position.Y);
         var scale = args.Scale;
+        var compositionVisual = GetCompositionVisual();
 
 
         void ApplyValues()
@@ -1172,7 +1222,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
                 _compositionUpdate = true;
                 _scaleChanged = !MathUtilities.AreClose(scale, ZoomFactor);
 
-                UpdateScrollableAreaForScale(scale);
+                ApplyScrollableArea(CalculateScrollableArea(scale));
 
                 SetCurrentValue(OffsetProperty, position);
                 SetCurrentValue(ZoomFactorProperty, scale);
@@ -1219,19 +1269,10 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         EnsureScrollAnimation();
     }
 
-    private void UpdateScrollableAreaForScale(double scale)
-    {
-        if (_interactionTracker == null || Child == null || _interactionSource == null)
-        {
-            return;
-        }
-
-        ApplyScrollableArea(CalculateScrollableArea(scale));
-    }
 
     private void ApplyScrollableArea((Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea)
     {
-        if (_interactionTracker == null || _interactionSource == null)
+        if (_interactionTracker is null || _interactionSource is null)
         {
             return;
         }
@@ -1341,32 +1382,91 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// </summary>
     private void EnsureScrollAnimation()
     {
-        if (Child is null || !Child.IsAttachedToVisualTree())
+        if (Child is null || _interactionTracker is null || !Child.IsAttachedToVisualTree())
             return;
         var compositionVisual = ElementComposition.GetElementVisual(Child)!;
         if (_animationGroup is null)
         {
-            var scrollAnimation = compositionVisual!.Compositor.CreateExpressionAnimation();
-            scrollAnimation.Expression =
-                "Vector3(Margin.X, Margin.Y, 0) - Vector3(Tracker.Position.X, Tracker.Position.Y, Tracker.Position.Z) + Vector3(this.Target.Offset.X, this.Target.Offset.Y, this.Target.Offset.Z)";
-            scrollAnimation.Target = "Translation";
-            scrollAnimation.SetReferenceParameter("Tracker", _interactionTracker!);
-            scrollAnimation.SetReferenceParameter("vis", compositionVisual);
-
-            var margin = Child!.Margin + Padding;
-            scrollAnimation.SetVector2Parameter("Margin", new Vector2((float)margin.Left, (float)margin.Top));
-
-            var scaleAnimation = compositionVisual!.Compositor.CreateExpressionAnimation();
-            scaleAnimation.Expression = "Vector3(Tracker.Scale, Tracker.Scale, Tracker.Scale)";
-            scaleAnimation.SetReferenceParameter("Tracker", _interactionTracker!);
-            scaleAnimation.Target = "Scale";
-
-            _animationGroup = compositionVisual.Compositor.CreateAnimationGroup();
-            _animationGroup.Add(scrollAnimation);
-            _animationGroup.Add(scaleAnimation);
+            _animationGroup = CreateScrollAnimationGroup(compositionVisual);
         }
 
         compositionVisual.StartAnimationGroup(_animationGroup);
+
+        // Avalonia expression animations are invalidation-driven; starting one does
+        // not enqueue an initial evaluation. Force the freshly attached expressions
+        // through the same server-side animation pipeline so first render matches
+        // the tracker state instead of waiting for the next input delta.
+        var serverVisual = compositionVisual.Server;
+        compositionVisual.Compositor.PostServerJob(() =>
+        {
+            serverVisual.Animations?.EvaluateAnimations();
+            serverVisual.RecomputeOwnProperties();
+        });
+    }
+
+    private void ClearScrollAnimation(CompositionVisual? compositionVisual)
+    {
+        if (_animationGroup is null)
+        {
+            return;
+        }
+
+        compositionVisual?.StopAnimationGroup(_animationGroup);
+        _animationGroup.Dispose();
+        _animationGroup = null;
+    }
+
+    private CompositionAnimationGroup CreateScrollAnimationGroup(CompositionVisual compositionVisual)
+    {
+        var scrollAnimation = compositionVisual.Compositor.CreateExpressionAnimation();
+        scrollAnimation.Expression =
+            "Vector3(Margin.X, Margin.Y, 0) - Vector3(Tracker.Position.X, Tracker.Position.Y, Tracker.Position.Z) + Vector3(this.Target.Offset.X, this.Target.Offset.Y, this.Target.Offset.Z)";
+        scrollAnimation.Target = "Translation";
+        scrollAnimation.SetReferenceParameter("Tracker", _interactionTracker!);
+
+        var margin = Child!.Margin + Padding;
+        scrollAnimation.SetVector2Parameter("Margin", new Vector2((float)margin.Left, (float)margin.Top));
+
+        var scaleAnimation = compositionVisual.Compositor.CreateExpressionAnimation();
+        scaleAnimation.Expression = "Vector3(Tracker.Scale, Tracker.Scale, Tracker.Scale)";
+        scaleAnimation.SetReferenceParameter("Tracker", _interactionTracker!);
+        scaleAnimation.Target = "Scale";
+
+        var animationGroup = compositionVisual.Compositor.CreateAnimationGroup();
+        animationGroup.Add(scrollAnimation);
+        animationGroup.Add(scaleAnimation);
+        return animationGroup;
+    }
+
+    private void SynchronizeCompositionVisualBeforeFirstAnimation()
+    {
+        if (_animationGroup is not null || Child is null || IsLoaded)
+        {
+            return;
+        }
+
+        var compositionVisual = ElementComposition.GetElementVisual(Child);
+        if (compositionVisual is null)
+        {
+            return;
+        }
+
+        var position = _interactionTracker?.Position ?? new Vector3D(Offset.X, Offset.Y, 0);
+        var scale = _interactionTracker?.Scale ?? ZoomFactor;
+
+        var visualScale = new Vector3D(scale, scale, scale);
+        var margin = Child!.Margin + Padding;
+        var offset = compositionVisual.Offset;
+        var translation = new Vector3D(
+            margin.Left - position.X + offset.X,
+            margin.Top - position.Y + offset.Y,
+            offset.Z - position.Z);
+
+        compositionVisual.Scale = visualScale;
+        if (scale < 1)
+        {
+            compositionVisual.Translation = translation;
+        }
     }
 
     private void UpdateInteractionOptions()

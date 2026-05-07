@@ -18,6 +18,8 @@
                                 Padding="{TemplateBinding Padding}"
                                 Background="{TemplateBinding Background}"
                                 ContentOrientation="{TemplateBinding ContentOrientation}"
+                                HorizontalScrollMode="{TemplateBinding HorizontalScrollMode}"
+                                VerticalScrollMode="{TemplateBinding VerticalScrollMode}"
                                 HorizontalSnapPointsAlignment="{TemplateBinding HorizontalSnapPointsAlignment}"
                                 HorizontalSnapPointsType="{TemplateBinding HorizontalSnapPointsType}"
                                 IsZoomEnabled="{TemplateBinding IsZoomEnabled}"
