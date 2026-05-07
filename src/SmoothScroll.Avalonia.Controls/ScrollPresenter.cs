@@ -179,6 +179,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     public bool CanHorizontallyScroll
     {
         get => GetValue(CanHorizontallyScrollProperty);
+        [Obsolete("The CanHorizontallyScroll setter is deprecated and is for internal use only. Use HorizontalScrollMode instead.")]
         set => SetValue(CanHorizontallyScrollProperty, value);
     }
 
@@ -188,6 +189,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     public bool CanVerticallyScroll
     {
         get => GetValue(CanVerticallyScrollProperty);
+        [Obsolete("The CanVerticallyScrollProperty setter is deprecated and is for internal use only. Use VerticalScrollMode instead.")]
         set => SetValue(CanVerticallyScrollProperty, value);
     }
 
@@ -295,7 +297,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// <summary>
     /// Gets or sets a value that indicates whether the content prefers to scroll horizontally or vertically.
     /// </summary>
-    [GeneratedStyledProperty]
+    [GeneratedStyledProperty(ScrollContentOrientation.Vertical)]
     public partial ScrollContentOrientation ContentOrientation { get; set; }
 
     /// <summary>

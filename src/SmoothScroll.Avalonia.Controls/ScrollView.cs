@@ -32,7 +32,7 @@ public partial class ScrollView : ScrollViewer
     /// <summary>
     /// Gets or sets a value that indicates whether the content prefers to scroll horizontally or vertically.
     /// </summary>
-    [GeneratedStyledProperty]
+    [GeneratedStyledProperty(ScrollContentOrientation.Vertical)]
     public partial ScrollContentOrientation ContentOrientation { get; set; }
 
     /// <summary>

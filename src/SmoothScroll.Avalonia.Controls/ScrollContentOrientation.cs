@@ -3,10 +3,11 @@
 /// <summary>
 /// Defines constants that specify the orientation of content scrolling in a <see cref = "ScrollView"/>.
 /// </summary>
+[Flags]
 public enum ScrollContentOrientation
 {
-    Vertical,
-    Horizontal,
-    None,
-    Both
+    None = 0,
+    Vertical = 1,
+    Horizontal = 2,
+    Both = Vertical | Horizontal
 }
