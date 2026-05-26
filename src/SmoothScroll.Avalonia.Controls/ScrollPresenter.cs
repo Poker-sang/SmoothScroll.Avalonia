@@ -116,7 +116,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     private CompositionAnimationGroup? _animationGroup;
     private bool _compositionUpdate;
     private bool _scaleChanged;
-    private long? requestId;
+    private long? _positionRequestId;
     private bool _arranging;
     private Size _extent;
     private Size _viewport;
@@ -510,6 +510,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         _interactionSource = null;
         _interactionTracker?.Dispose();
         _interactionTracker = null;
+        _positionRequestId = null;
     }
 
     /// <summary>
@@ -674,8 +675,12 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
                     try
                     {
                         _compositionUpdate = true;
-                        _interactionTracker?.TryUpdatePositionBy(new Vector3D(anchorShift.X, anchorShift.Y, 0));
                         SetCurrentValue(OffsetProperty, newOffset);
+
+                        if (_interactionTracker is not null)
+                        {
+                            _positionRequestId = _interactionTracker.TryUpdatePosition(new Vector3D(Offset.X, Offset.Y, 0));
+                        }
                     }
                     finally
                     {
@@ -812,11 +817,11 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             if (!_scaleChanged && !_compositionUpdate)
             {
                 var offset = change.GetNewValue<Vector>();
-                requestId = _interactionTracker!.TryUpdatePosition(new Vector3D(offset.X, offset.Y, 0));
+                _positionRequestId = _interactionTracker!.TryUpdatePosition(new Vector3D(offset.X, offset.Y, 0));
             }
             else
             {
-                requestId = null;
+                _positionRequestId = null;
             }
 
             SyncOwnerOffset(change.GetNewValue<Vector>());
@@ -1216,6 +1221,13 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         void ApplyValues()
         {
             if (_interactionTracker != sender)
+            {
+                return;
+            }
+
+            if (args.RequestId != 0 &&
+                _positionRequestId is { } positionRequestId &&
+                args.RequestId < positionRequestId)
             {
                 return;
             }
