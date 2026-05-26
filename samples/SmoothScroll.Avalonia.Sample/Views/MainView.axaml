@@ -8,24 +8,20 @@
     xmlns:pages="clr-namespace:SmoothScroll.Avalonia.Sample.Views.Pages"
     xmlns:presenters="clr-namespace:Avalonia.Controls.Presenters;assembly=SmoothScroll.Avalonia.Controls"
     xmlns:vm="using:SmoothScroll.Avalonia.Sample.ViewModels"
+    mc:Ignorable="d"
     d:DesignHeight="450"
-    d:DesignWidth="800"
-    mc:Ignorable="d">
+    d:DesignWidth="800">
     <Panel>
-        <TabControl>
-            <TabItem Header="Zooming">
-                <pages:ZoomPage />
-            </TabItem>
-            <TabItem Header="List">
-                <pages:ListPage />
-            </TabItem>
-            <TabItem Header="TextBox">
-                <pages:TextboxPage />
-            </TabItem>
-            <TabItem Header="Chaining">
-                <pages:ChainingPage />
-            </TabItem>
-        </TabControl>
+        <TabbedPage>
+            <TabbedPage.Resources>
+                <x:Double x:Key="TabbedPageTabItemHeaderFontSize">20</x:Double>
+            </TabbedPage.Resources>
+            <pages:ZoomPage />
+            <pages:ListPage />
+            <pages:TextboxPage />
+            <pages:ChainingPage />
+            <pages:AnchorPage />
+        </TabbedPage>
         <Button
             Margin="24"
             HorizontalAlignment="Left"
