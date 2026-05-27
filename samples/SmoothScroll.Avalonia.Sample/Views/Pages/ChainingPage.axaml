@@ -5,9 +5,10 @@
     xmlns:controls="using:SmoothScroll.Avalonia.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Header="Chaining"
+    mc:Ignorable="d"
     d:DesignHeight="450"
-    d:DesignWidth="800"
-    mc:Ignorable="d">
+    d:DesignWidth="800">
     <ScrollViewer>
         <StackPanel Orientation="Vertical" Spacing="4">
 
