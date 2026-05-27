@@ -116,7 +116,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     private CompositionAnimationGroup? _animationGroup;
     private bool _compositionUpdate;
     private bool _scaleChanged;
-    private long? _positionRequestId;
+    private long? _requestId;
     private bool _arranging;
     private Size _extent;
     private Size _viewport;
@@ -510,7 +510,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         _interactionSource = null;
         _interactionTracker?.Dispose();
         _interactionTracker = null;
-        _positionRequestId = null;
+        _requestId = null;
     }
 
     /// <summary>
@@ -679,7 +679,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
                         if (_interactionTracker is not null)
                         {
-                            _positionRequestId = _interactionTracker.TryUpdatePosition(new Vector3D(Offset.X, Offset.Y, 0));
+                            _requestId = _interactionTracker.TryUpdatePosition(new Vector3D(Offset.X, Offset.Y, 0));
                         }
                     }
                     finally
@@ -817,11 +817,11 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             if (!_scaleChanged && !_compositionUpdate)
             {
                 var offset = change.GetNewValue<Vector>();
-                _positionRequestId = _interactionTracker!.TryUpdatePosition(new Vector3D(offset.X, offset.Y, 0));
+                _requestId = _interactionTracker!.TryUpdatePosition(new Vector3D(offset.X, offset.Y, 0));
             }
             else
             {
-                _positionRequestId = null;
+                _requestId = null;
             }
 
             SyncOwnerOffset(change.GetNewValue<Vector>());
@@ -1226,8 +1226,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             }
 
             if (args.RequestId != 0 &&
-                _positionRequestId is { } positionRequestId &&
-                args.RequestId < positionRequestId)
+                _requestId is { } id &&
+                args.RequestId < id)
             {
                 return;
             }
