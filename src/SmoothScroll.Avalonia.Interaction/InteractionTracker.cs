@@ -48,7 +48,7 @@ public partial class InteractionTracker : CompositionObject
     public int TryUpdateScale(double scale, Vector3D centerPoint)
     {
         var id = NextRequestId();
-        QueueRequest(new TryUpdateScaleRequest(id, Scale, centerPoint ));
+        QueueRequest(new TryUpdateScaleRequest(id, scale, centerPoint));
         return id;
     }
 
