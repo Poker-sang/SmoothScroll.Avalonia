@@ -81,9 +81,9 @@ public class InputElementInteractionSource : IDisposable
     public InputElementInteractionSource(InputElement inputElement, InteractionTracker tracker)
     {
         _inputElement = inputElement;
-        _inputElement.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
-        _inputElement.AddHandler(InputElement.PointerMovedEvent, OnPointerMoved, RoutingStrategies.Tunnel);
-        _inputElement.AddHandler(InputElement.PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Tunnel);
+        _inputElement.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble);
+        _inputElement.AddHandler(InputElement.PointerMovedEvent, OnPointerMoved, RoutingStrategies.Bubble);
+        _inputElement.AddHandler(InputElement.PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Bubble);
         _inputElement.PointerCaptureLost += OnPointerCaptureLost;
         _inputElement.PointerWheelChanged += OnPointerWheelChanged;
         _tracker = tracker;
