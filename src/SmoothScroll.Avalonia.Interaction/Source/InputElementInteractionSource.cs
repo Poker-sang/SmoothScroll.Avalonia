@@ -373,7 +373,7 @@ public class InputElementInteractionSource : IDisposable
 
         if (velocity != Vector.Zero)
         {
-            _tracker.StartInertia(new Point(velocity.X, velocity.Y));
+            _tracker.StartInertia(-new Point(velocity.X, velocity.Y));
         }
         else
         {
