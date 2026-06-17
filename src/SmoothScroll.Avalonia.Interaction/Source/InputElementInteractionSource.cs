@@ -126,11 +126,12 @@ public class InputElementInteractionSource : IDisposable
         {
             if (PositionYSourceMode is InteractionSourceMode.Disabled)
             {
-                if (PositionXSourceMode is InteractionSourceMode.Disabled) return;
+                if (PositionXSourceMode is InteractionSourceMode.Disabled)
+                    return;
                 if (IsAtBoundaryForChaining(deltaY, _tracker.Position.X, _tracker.MinPosition.X, _tracker.MaxPosition.X, PositionXChainingMode, _hasHorizontalChainingTarget))
                     return;
 
-                _tracker.ApplyWheelDelta(new Vector(-deltaY,0));
+                _tracker.ApplyWheelDelta(new Vector(-deltaY, 0));
                 e.Handled = true;
                 return;
             }
@@ -185,12 +186,16 @@ public class InputElementInteractionSource : IDisposable
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (e.Properties.IsRightButtonPressed)
+        {
+            return;
+        }
         if (!IsTranslationEnabled && ScaleSourceMode is InteractionSourceMode.Disabled)
         {
             return;
         }
 
-        if(e.Pointer.Type == PointerType.Mouse && ScaleSourceMode is InteractionSourceMode.Disabled)
+        if (e.Pointer.Type == PointerType.Mouse && ScaleSourceMode is InteractionSourceMode.Disabled)
         {
             return;
         }
@@ -414,7 +419,7 @@ public class InputElementInteractionSource : IDisposable
         // However, deltas from original mouse wheel is often integers,
         // so we can "distinguish" them by checking whether the delta's absolute value is close to an integer.
         var absoluteValue = Math.Abs(delta);
-        return !MathUtilities.AreClose(absoluteValue, (int)absoluteValue) ;
+        return !MathUtilities.AreClose(absoluteValue, (int)absoluteValue);
     }
 
     private void HandlePrecisionTouchpadScroll(PointerWheelEventArgs e)
