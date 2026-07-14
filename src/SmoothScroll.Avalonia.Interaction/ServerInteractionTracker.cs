@@ -17,11 +17,28 @@ internal partial class ServerInteractionTracker
     private InteractionTrackerState? _state;
     private InteractionTracker? _client;
 
+    internal double OverscrollElasticity { get; private set; } = 0.5;
+
+    internal double OverscrollBounceRate { get; private set; } = 1;
+
 
     partial void Initialize()
     {
         _scale = 1;
         _positionInertiaDecayRate = new Vector3D(0.95, 0.95, 0.95);
+        _scaleInertiaDecayRate = 0.95;
+    }
+
+    partial void OnFieldsDeserialized(InteractionTrackerChangedFields changed)
+    {
+        const InteractionTrackerChangedFields BoundsFields =
+            InteractionTrackerChangedFields.MinPosition
+            | InteractionTrackerChangedFields.MinPositionAnimated
+            | InteractionTrackerChangedFields.MaxPosition
+            | InteractionTrackerChangedFields.MaxPositionAnimated;
+
+        if ((changed & BoundsFields) is not 0)
+            State.ReceiveBoundsUpdate();
     }
 
     public void AttachClient(InteractionTracker client)
@@ -29,18 +46,6 @@ internal partial class ServerInteractionTracker
         _client = client;
         Activate();
         _state ??= new IdleState(this, requestId: 0, isInitialIdleState: true);
-    }
-
-    public void UpdateMinPosition(Vector3D value)
-    {
-        MinPosition = value;
-        State.ReceiveBoundsUpdate();
-    }
-
-    public void UpdateMaxPosition(Vector3D value)
-    {
-        MaxPosition = value;
-        State.ReceiveBoundsUpdate();
     }
 
     internal void SetPosition(Vector3D newPosition, int requestId)
@@ -118,6 +123,13 @@ internal partial class ServerInteractionTracker
 
     internal void NotifyRequestIgnored(int requestId)
         => PostToClient(client => client.RaiseRequestIgnored(requestId));
+
+    internal void ConfigurePhysics(double overscrollElasticity, double overscrollBounceRate)
+    {
+        OverscrollElasticity = Math.Clamp(overscrollElasticity, 0, 1);
+        OverscrollBounceRate = Math.Max(overscrollBounceRate, 0.01);
+    }
+
     private InteractionTrackerState State => _state ??= new IdleState(this, requestId: 0, isInitialIdleState: true);
 
     private void NotifyValuesChanged(Vector3D position, double scale, int requestId)
@@ -162,19 +174,38 @@ internal partial class ServerInteractionTracker
                     State.ApplyManipulationDelta(applyManipulationDeltaRequest.TranslationDelta);
                     break;
                 case StartInertiaRequest startInertiaRequest:
-                    State.StartInertia(startInertiaRequest.LinearVelocity);
+                    State.StartInertia(
+                        startInertiaRequest.LinearVelocity,
+                        startInertiaRequest.IncludeScaleVelocity);
                     break;
                 case AddScaleVelocityRequest addScaleVelocityRequest:
-                    State.AddScaleVelocity(addScaleVelocityRequest.Origin, addScaleVelocityRequest.Delta);
+                    State.AddScaleVelocity(
+                        addScaleVelocityRequest.Origin,
+                        addScaleVelocityRequest.Delta,
+                        addScaleVelocityRequest.UseInertia);
                     break;
                 case ApplyWheelDeltaRequest applyWheelDeltaRequest:
-                    State.ApplyWheelDelta(applyWheelDeltaRequest.Delta);
+                    State.ApplyWheelDelta(
+                        applyWheelDeltaRequest.Delta,
+                        applyWheelDeltaRequest.UseInertia);
+                    break;
+                case UpdateInertiaRestingPositionRequest updateInertiaRestingPositionRequest:
+                    State.UpdateInertiaRestingPosition(
+                        updateInertiaRestingPositionRequest.Position,
+                        updateInertiaRestingPositionRequest.RequestId);
                     break;
                 case StartAnimationRequest startAnimationRequest:
-                    State.StartAnimation(startAnimationRequest.Animation, startAnimationRequest.ScaleCenterPoint);
+                    State.StartAnimation(
+                        startAnimationRequest.Animation,
+                        startAnimationRequest.RequestId,
+                        startAnimationRequest.ScaleCenterPoint);
+                    break;
+                case ConfigurePhysicsRequest configurePhysicsRequest:
+                    ConfigurePhysics(
+                        configurePhysicsRequest.OverscrollElasticity,
+                        configurePhysicsRequest.OverscrollBounceRate);
                     break;
             }
         }
     }
 }
-

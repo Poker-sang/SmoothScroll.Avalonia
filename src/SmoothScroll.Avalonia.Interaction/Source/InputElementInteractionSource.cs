@@ -1,5 +1,4 @@
-﻿using System.Numerics;
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -12,57 +11,30 @@ using Vector = Avalonia.Vector;
 
 namespace SmoothScroll.Avalonia.Interaction;
 
-public class InputElementInteractionSource : IDisposable
+public sealed class InputElementInteractionSource : IDisposable
 {
     private const double TouchpadDeltaScale = 48;
-
-    // On WinUI, this depends on mouse setting "how many lines to scroll each time"
-    // The default Windows setting is 3 lines, and each line is 16px.
-    // Note: the value for each line may vary depending on scaling.
-    // For now, we just use 128.
     private const double MouseWheelDeltaScale = 128;
+    private const double MouseZoomDragScale = 0.01;
+    private static readonly double MouseWheelZoomStep = Math.Log(1.2);
 
-    /// <summary>
-    /// Defines how interactions are processed for an <see cref="InputElementInteractionSource"/> on the scale axis.
-    /// This property must be enabled to allow the <see cref="InputElementInteractionSource"/> to send scale data to <see cref="InteractionTracker"/>.
-    /// </summary>
     public InteractionSourceMode ScaleSourceMode { get; set; } = InteractionSourceMode.Disabled;
 
-    /// <summary>
-    /// Source mode for the X-axis.
-    /// The <see cref="PositionXSourceMode"/> property defines how interactions are processed for a <see cref="InputElementInteractionSource"/> on the X-axis.
-    /// This property must be enabled to allow the <see cref="InputElementInteractionSource"/> to send X-axis data to <see cref="InteractionTracker"/>.
-    /// </summary>
     public InteractionSourceMode PositionXSourceMode { get; set; } = InteractionSourceMode.EnabledWithInertia;
 
-    /// <summary>
-    /// Source mode for the Y-axis.
-    /// The <see cref="PositionYSourceMode"/> property defines how interactions are processed for a <see cref="InputElementInteractionSource"/> on the Y-axis.
-    /// This property must be enabled to allow the <see cref="InputElementInteractionSource"/> to send Y-axis data to <see cref="InteractionTracker"/>.
-    /// </summary>
     public InteractionSourceMode PositionYSourceMode { get; set; } = InteractionSourceMode.EnabledWithInertia;
 
-    /// <summary>The PositionXChainingMode property defines the chaining behavior for an InteractionSource in the X direction. There are three InteractionChainingMode types:
-    /// 
-    /// - Auto
-    /// - Always
-    /// - Never
-    /// 
-    /// When chaining in the X direction is enabled, input will flow to the nearest ancestor's VisualInteractionSource whenever the interaction (such as panning) would otherwise take InteractionTracker ’s position past its minimum or maximum X position.</summary>
-    /// <returns>Chaining mode for the X-axis.</returns>
     public InteractionChainingMode PositionXChainingMode { get; set; } = InteractionChainingMode.Auto;
 
-    /// <summary>The PositionYChainingMode property defines the chaining behavior for an InteractionSource in the Y direction. There are three types of InteractionChainingMode s:
-    /// 
-    /// - Auto
-    /// - Always
-    /// - Never
-    /// 
-    /// When chaining in the Y direction is enabled, input will flow to the nearest ancestor’s VisualInteractionSource whenever the interaction (such as panning) would otherwise take InteractionTracker ’s position past its minimum or maximum Y position.</summary>
-    /// <returns>Chaining mode for the Y-axis.</returns>
     public InteractionChainingMode PositionYChainingMode { get; set; } = InteractionChainingMode.Auto;
 
-    private readonly InteractionTracker _tracker; // TODO: Support multiple trackers
+    public ScrollGestureBindings GestureBindings { get; set; } = ScrollGestureBindings.CreateDefault();
+
+    public double ScrollInputMultiplier { get; set; } = 1;
+
+    public double ZoomInputMultiplier { get; set; } = 1;
+
+    private readonly InteractionTracker _tracker;
     private readonly InputElement _inputElement;
     private readonly double _manipulationStartDistance;
     private IPointer? _firstContact;
@@ -72,21 +44,24 @@ public class InputElementInteractionSource : IDisposable
     private double _previousDistance;
     private Point _previousCenter;
     private bool _isInteracting;
-
     private Point _pressedPosition;
     private VelocityTracker? _velocityTracker;
-    private bool _hasHorizontalChainingTarget;
-    private bool _hasVerticalChainingTarget;
+    private IScrollable? _horizontalChainingTarget;
+    private IScrollable? _verticalChainingTarget;
+    private ScrollGestureAction _activeDragAction;
+    private KeyModifiers _activeModifiers;
+    private Vector _lastTrackedVelocity;
+    private bool _hasScaleInput;
 
     public InputElementInteractionSource(InputElement inputElement, InteractionTracker tracker)
     {
         _inputElement = inputElement;
+        _tracker = tracker;
         _inputElement.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble);
         _inputElement.AddHandler(InputElement.PointerMovedEvent, OnPointerMoved, RoutingStrategies.Bubble);
         _inputElement.AddHandler(InputElement.PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Bubble);
         _inputElement.PointerCaptureLost += OnPointerCaptureLost;
         _inputElement.PointerWheelChanged += OnPointerWheelChanged;
-        _tracker = tracker;
 
         if (_inputElement is Visual visual)
         {
@@ -95,153 +70,226 @@ public class InputElementInteractionSource : IDisposable
         }
 
         var tapSize = AvaloniaLocator.Current?.GetService<IPlatformSettings>()?.GetTapSize(PointerType.Touch);
-        _manipulationStartDistance = (tapSize?.Height ?? 10) / 2.0;
-        UpdateChainingTargets();
+        _manipulationStartDistance = (tapSize?.Height ?? 10) / 2;
+        UpdateChainingTarget();
     }
 
     private bool IsTranslationEnabled =>
-        PositionXSourceMode is not InteractionSourceMode.Disabled ||
-        PositionYSourceMode is not InteractionSourceMode.Disabled;
+        PositionXSourceMode is not InteractionSourceMode.Disabled
+        || PositionYSourceMode is not InteractionSourceMode.Disabled;
+
+    private bool ShouldAutoScrollVertically =>
+        PositionYSourceMode is not InteractionSourceMode.Disabled
+        && (HasVerticalScrollRange || !HasHorizontalScrollRange);
+
+    private bool HasHorizontalScrollRange =>
+        _tracker.MaxPosition.X - _tracker.MinPosition.X > 0.5;
+
+    private bool HasVerticalScrollRange =>
+        _tracker.MaxPosition.Y - _tracker.MinPosition.Y > 0.5;
 
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if (IsPrecisionTouchpadScroll(e))
-        {
-            HandlePrecisionTouchpadScroll(e);
-            return;
-        }
+        UpdateChainingTarget();
+        var deltaScale = IsPrecisionTouchpadScroll(e) ? TouchpadDeltaScale : MouseWheelDeltaScale;
+        var translation = default(Vector);
+        var scaleLogDelta = 0.0;
 
-        if (ScaleSourceMode is not InteractionSourceMode.Disabled &&
-            e.Delta.Y != 0)
+        ApplyWheelComponent(e.Delta.Y, ScrollInputGesture.MouseWheel, horizontalComponent: false);
+        ApplyWheelComponent(e.Delta.X, ScrollInputGesture.MouseWheelTilt, horizontalComponent: true);
+
+        if (translation.X is not 0)
         {
-            var origin = e.GetPosition(_inputElement);
-            var scaleDelta = Math.Pow(1.2, e.Delta.Y);
-            _tracker.AddScaleVelocity(origin, scaleDelta);
-            e.Handled = true;
-            return;
-        }
-        var deltaX = e.Delta.X * MouseWheelDeltaScale;
-        var deltaY = e.Delta.Y * MouseWheelDeltaScale;
-        if (deltaY != 0)
-        {
-            if (PositionYSourceMode is InteractionSourceMode.Disabled)
+            if (PositionXSourceMode is InteractionSourceMode.Disabled
+                || IsAtBoundaryForChaining(
+                    -translation.X,
+                    _tracker.Position.X,
+                    _tracker.MinPosition.X,
+                    _tracker.MaxPosition.X,
+                    PositionXChainingMode,
+                    HasHorizontalChainingTarget))
             {
-                if (PositionXSourceMode is InteractionSourceMode.Disabled)
-                    return;
-                if (IsAtBoundaryForChaining(deltaY, _tracker.Position.X, _tracker.MinPosition.X, _tracker.MaxPosition.X, PositionXChainingMode, _hasHorizontalChainingTarget))
-                    return;
-
-                _tracker.ApplyWheelDelta(new Vector(-deltaY, 0));
-                e.Handled = true;
-                return;
+                translation = translation.WithX(0);
             }
-
-            if (IsAtBoundaryForChaining(deltaY, _tracker.Position.Y, _tracker.MinPosition.Y, _tracker.MaxPosition.Y, PositionYChainingMode, _hasVerticalChainingTarget))
-                return;
-
-            _tracker.ApplyWheelDelta(new Vector(0, -deltaY));
         }
-        else
+
+        if (translation.Y is not 0)
         {
-            if (PositionXSourceMode is InteractionSourceMode.Disabled)
+            if (PositionYSourceMode is InteractionSourceMode.Disabled
+                || IsAtBoundaryForChaining(
+                    -translation.Y,
+                    _tracker.Position.Y,
+                    _tracker.MinPosition.Y,
+                    _tracker.MaxPosition.Y,
+                    PositionYChainingMode,
+                    HasVerticalChainingTarget))
             {
-                return;
+                translation = translation.WithY(0);
             }
-
-            if (IsAtBoundaryForChaining(deltaX, _tracker.Position.X, _tracker.MinPosition.X, _tracker.MaxPosition.X, PositionXChainingMode, _hasHorizontalChainingTarget))
-                return;
-
-            _tracker.ApplyWheelDelta(new Vector(-deltaX, 0));
         }
 
-        e.Handled = true;
+        var handled = false;
+        var directTranslation = SelectTranslationForMode(
+            translation,
+            InteractionSourceMode.EnabledWithoutInertia);
+        if (directTranslation != default)
+        {
+            _tracker.ApplyWheelDelta(directTranslation, useInertia: false);
+            handled = true;
+        }
+
+        var inertialTranslation = SelectTranslationForMode(
+            translation,
+            InteractionSourceMode.EnabledWithInertia);
+        if (inertialTranslation != default)
+        {
+            _tracker.ApplyWheelDelta(inertialTranslation, useInertia: true);
+            handled = true;
+        }
+
+        if (scaleLogDelta is not 0 && ScaleSourceMode is not InteractionSourceMode.Disabled)
+        {
+            _tracker.AddScaleVelocity(
+                e.GetPosition(_inputElement),
+                Math.Exp(scaleLogDelta),
+                ScaleSourceMode is InteractionSourceMode.EnabledWithInertia);
+            handled = true;
+        }
+
+        e.Handled = handled;
+        return;
+
+        void ApplyWheelComponent(double delta, ScrollInputGesture gesture, bool horizontalComponent)
+        {
+            if (delta is 0)
+                return;
+
+            var action = ResolveAction(gesture, e.KeyModifiers);
+            switch (action)
+            {
+                case ScrollGestureAction.Pan:
+                    if (horizontalComponent)
+                        translation += new Vector(-delta * deltaScale * ScrollInputMultiplier, 0);
+                    else
+                        translation += new Vector(0, -delta * deltaScale * ScrollInputMultiplier);
+                    break;
+                case ScrollGestureAction.AutoScroll:
+                    if (ShouldAutoScrollVertically)
+                        translation += new Vector(0, -delta * deltaScale * ScrollInputMultiplier);
+                    else if (PositionXSourceMode is not InteractionSourceMode.Disabled)
+                        translation += new Vector(-delta * deltaScale * ScrollInputMultiplier, 0);
+                    break;
+                case ScrollGestureAction.HorizontalScroll:
+                    translation += new Vector(-delta * deltaScale * ScrollInputMultiplier, 0);
+                    break;
+                case ScrollGestureAction.VerticalScroll:
+                    translation += new Vector(0, -delta * deltaScale * ScrollInputMultiplier);
+                    break;
+                case ScrollGestureAction.Zoom:
+                    scaleLogDelta += delta * MouseWheelZoomStep * ZoomInputMultiplier;
+                    break;
+            }
+        }
     }
 
-    private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
-    {
-        UpdateChainingTargets();
-    }
+    private void OnAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e) => UpdateChainingTarget();
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        _hasHorizontalChainingTarget = false;
-        _hasVerticalChainingTarget = false;
+        _horizontalChainingTarget = null;
+        _verticalChainingTarget = null;
     }
 
-    private void UpdateChainingTargets()
+    private bool HasHorizontalChainingTarget => _horizontalChainingTarget is not null;
+
+    private bool HasVerticalChainingTarget => _verticalChainingTarget is not null;
+
+    private void UpdateChainingTarget()
     {
         if (_inputElement is not Visual visual)
         {
-            _hasHorizontalChainingTarget = false;
-            _hasVerticalChainingTarget = false;
+            _horizontalChainingTarget = null;
+            _verticalChainingTarget = null;
             return;
         }
 
-        var currentScrollViewer = visual as ScrollViewer ?? visual.FindAncestorOfType<ScrollViewer>();
-        var ancestorScrollViewer = currentScrollViewer?.FindAncestorOfType<ScrollViewer>();
-
-        _hasHorizontalChainingTarget = ancestorScrollViewer is not null && ancestorScrollViewer.HorizontalScrollBarVisibility is not ScrollBarVisibility.Disabled;
-        _hasVerticalChainingTarget = ancestorScrollViewer is not null && ancestorScrollViewer.VerticalScrollBarVisibility is not ScrollBarVisibility.Disabled;
+        // Resolve the target after layout as its CanScroll flags are not reliable during attachment.
+        _horizontalChainingTarget = null;
+        _verticalChainingTarget = null;
+        foreach (var target in visual.GetVisualAncestors().OfType<IScrollable>().Skip(1))
+        {
+            if (_horizontalChainingTarget is null && target.CanHorizontallyScroll)
+                _horizontalChainingTarget = target;
+            if (_verticalChainingTarget is null && target.CanVerticallyScroll)
+                _verticalChainingTarget = target;
+            if (_horizontalChainingTarget is not null && _verticalChainingTarget is not null)
+                break;
+        }
     }
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Properties.IsRightButtonPressed)
-        {
+        UpdateChainingTarget();
+        if (!TryGetPressedAction(e, out var action))
             return;
-        }
-        if (!IsTranslationEnabled && ScaleSourceMode is InteractionSourceMode.Disabled)
-        {
-            return;
-        }
-
-        if (e.Pointer.Type == PointerType.Mouse && ScaleSourceMode is InteractionSourceMode.Disabled)
-        {
-            return;
-        }
 
         var position = e.GetPosition(_inputElement);
 
-        if (_firstContact is not null && !_isInteracting)
-        {
+        if (_firstContact is not null && !_isInteracting && !IsContactCapturedByThisSource(_firstContact))
             ResetContacts();
-        }
 
         if (_firstContact is not null)
         {
-            if (ScaleSourceMode is InteractionSourceMode.Disabled)
+            if (_secondContact is not null)
+            {
+                if (_isInteracting && e.Pointer.Type is PointerType.Touch or PointerType.Pen)
+                {
+                    e.PreventGestureRecognition();
+                    e.Handled = true;
+                }
+
+                return;
+            }
+
+            if (e.Pointer == _firstContact
+                || e.Pointer.Type is not PointerType.Touch and not PointerType.Pen
+                || ResolveAction(ScrollInputGesture.TouchPinch, e.KeyModifiers) is not ScrollGestureAction.Zoom
+                || ScaleSourceMode is InteractionSourceMode.Disabled)
             {
                 return;
             }
 
             _secondContact = e.Pointer;
             _secondPosition = position;
-            _previousDistance = GetDistance(_firstPosition, _secondPosition);
+            _previousDistance = Math.Max(GetDistance(_firstPosition, _secondPosition), 1);
             _previousCenter = GetCenter(_firstPosition, _secondPosition);
-
-            if (!_isInteracting)
+            _pressedPosition = _previousCenter;
+            _velocityTracker = new VelocityTracker();
+            _velocityTracker.AddPosition(TimeSpan.FromMilliseconds(e.Timestamp), default);
+            _lastTrackedVelocity = default;
+            _activeModifiers = e.KeyModifiers;
+            if (TryStartInteraction(e, _previousCenter))
             {
-                TryStartInteraction(e, _firstPosition);
+                // Seed the midpoint before either contact moves. Without this baseline the first
+                // pinch update treats the moved midpoint as the origin and visibly jumps.
+                _tracker.AddScaleVelocity(_previousCenter, 1, useInertia: false);
             }
 
             CapturePointer(_firstContact);
             CapturePointer(_secondContact);
-
             e.PreventGestureRecognition();
             e.Handled = true;
             return;
         }
 
         _firstContact = e.Pointer;
+        _activeDragAction = action;
+        _activeModifiers = e.KeyModifiers;
         _pressedPosition = position;
-        _firstPosition = _pressedPosition;
+        _firstPosition = position;
         _velocityTracker = new VelocityTracker();
         _velocityTracker.AddPosition(TimeSpan.FromMilliseconds(e.Timestamp), default);
-
-        if (e.Pointer.Type is not PointerType.Touch and not PointerType.Pen)
-        {
-            TryStartInteraction(e, position);
-        }
+        _lastTrackedVelocity = default;
     }
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
@@ -251,75 +299,125 @@ public class InputElementInteractionSource : IDisposable
         if (_secondContact is not null)
         {
             if (e.Pointer == _firstContact)
-            {
                 _firstPosition = position;
-            }
             else if (e.Pointer == _secondContact)
-            {
                 _secondPosition = position;
-            }
+            else
+                return;
 
-            if (!_isInteracting && _firstContact is not null)
-            {
-                TryStartInteraction(e, _firstPosition);
-            }
-
-            var currentDistance = GetDistance(_firstPosition, _secondPosition);
+            var currentDistance = Math.Max(GetDistance(_firstPosition, _secondPosition), 1);
             var currentCenter = GetCenter(_firstPosition, _secondPosition);
 
-            if (_isInteracting && _previousDistance > 0)
+            if (!_isInteracting && !TryStartInteraction(e, currentCenter))
+                return;
+
+            // InteractingState applies the pinch-center translation while updating scale. Feeding the
+            // same delta as a separate pan would move the content twice and cause visible jumps.
+            var centerDelta = currentCenter - _previousCenter;
+            TrackVelocity(e.Timestamp, currentCenter - _pressedPosition);
+
+            var handled = centerDelta != default;
+            if (_previousDistance > 0
+                && ResolveAction(ScrollInputGesture.TouchPinch, _activeModifiers) is ScrollGestureAction.Zoom)
             {
                 var scaleRatio = currentDistance / _previousDistance;
-                _tracker.AddScaleVelocity(currentCenter, scaleRatio);
-                e.Handled = true;
+                _tracker.AddScaleVelocity(
+                    currentCenter,
+                    Math.Pow(scaleRatio, ZoomInputMultiplier),
+                    ScaleSourceMode is InteractionSourceMode.EnabledWithInertia);
+                _hasScaleInput = true;
+                handled = true;
             }
 
             _previousDistance = currentDistance;
+            _previousCenter = currentCenter;
             e.PreventGestureRecognition();
+            e.Handled = handled;
+            return;
         }
-        else if (_firstContact is not null && e.Pointer == _firstContact)
+
+        if (_firstContact is null || e.Pointer != _firstContact)
+            return;
+
+        if (!_isInteracting)
         {
-            if (!_isInteracting && ShouldStartManipulation(position - _pressedPosition, e.Pointer.Type))
-            {
-                if (!TryStartInteraction(e, _pressedPosition))
-                {
-                    return;
-                }
-
-                _firstPosition = position;
-            }
-
-            if (!_isInteracting)
+            if (!ShouldStartManipulation(position - _pressedPosition, e.Pointer.Type)
+                || !TryStartInteraction(e, _pressedPosition))
             {
                 return;
             }
 
-            var delta = position - _firstPosition;
-            if (PositionXSourceMode is InteractionSourceMode.Disabled)
-            {
-                delta = delta.WithX(0);
-            }
-
-            if (PositionYSourceMode is InteractionSourceMode.Disabled)
-            {
-                delta = delta.WithY(0);
-            }
-
-            if (delta != default)
-            {
-                if (ShouldChainDuringInteraction(delta) && ScaleSourceMode is not InteractionSourceMode.EnabledWithInertia)
-                {
-                    _firstContact?.Capture(null);
-                    return;
-                }
-
-                _tracker.ApplyManipulationDelta(-delta);
-                _velocityTracker?.AddPosition(TimeSpan.FromMilliseconds(e.Timestamp), position - _pressedPosition);
-                _firstPosition = position;
-            }
-
-            e.Handled = true;
+            _firstPosition = position;
+            return;
         }
+
+        var delta = position - _firstPosition;
+        if (_activeDragAction is ScrollGestureAction.Zoom)
+        {
+            if (delta.Y is not 0 && ScaleSourceMode is not InteractionSourceMode.Disabled)
+            {
+                var scaleRatio = Math.Exp(-delta.Y * MouseZoomDragScale * ZoomInputMultiplier);
+                _tracker.AddScaleVelocity(
+                    position,
+                    scaleRatio,
+                    ScaleSourceMode is InteractionSourceMode.EnabledWithInertia);
+                _hasScaleInput = true;
+            }
+        }
+        else
+        {
+            if (!ApplyTranslation(delta, _activeDragAction))
+                return;
+            TrackVelocity(e.Timestamp, position - _pressedPosition);
+        }
+
+        _firstPosition = position;
+        e.Handled = true;
+    }
+
+    private bool ApplyTranslation(Vector pointerDelta, ScrollGestureAction action)
+    {
+        var delta = action switch
+        {
+            ScrollGestureAction.Pan => pointerDelta,
+            ScrollGestureAction.AutoScroll when ShouldAutoScrollVertically =>
+                pointerDelta.WithX(0),
+            ScrollGestureAction.AutoScroll when PositionXSourceMode is not InteractionSourceMode.Disabled =>
+                pointerDelta.WithY(0),
+            ScrollGestureAction.HorizontalScroll => pointerDelta.WithY(0),
+            ScrollGestureAction.VerticalScroll => pointerDelta.WithX(0),
+            _ => default
+        };
+
+        if (PositionXSourceMode is InteractionSourceMode.Disabled)
+            delta = delta.WithX(0);
+        if (PositionYSourceMode is InteractionSourceMode.Disabled)
+            delta = delta.WithY(0);
+        if (delta == default)
+            return false;
+
+        if (ShouldChainDuringInteraction(delta))
+        {
+            TransferPointerToChainingTarget(_firstContact, delta);
+            return false;
+        }
+
+        _tracker.ApplyManipulationDelta(-delta * ScrollInputMultiplier);
+        return true;
+    }
+
+    private Vector SelectTranslationForMode(Vector translation, InteractionSourceMode mode) =>
+        new(
+            PositionXSourceMode is var xMode && xMode == mode ? translation.X : 0,
+            PositionYSourceMode is var yMode && yMode == mode ? translation.Y : 0);
+
+    private void TrackVelocity(ulong timestamp, Vector position)
+    {
+        if (_velocityTracker is null)
+            return;
+
+        _velocityTracker.AddPosition(TimeSpan.FromMilliseconds(timestamp), position);
+        _lastTrackedVelocity = _velocityTracker.GetFlingVelocity().PixelsPerSecond;
     }
 
     private void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -330,6 +428,7 @@ public class InputElementInteractionSource : IDisposable
             _previousDistance = 0;
             if (_isInteracting)
             {
+                ResetSingleContactTracking(e.Timestamp, _firstPosition);
                 e.Handled = true;
             }
 
@@ -337,23 +436,15 @@ public class InputElementInteractionSource : IDisposable
         }
 
         if (_firstContact != e.Pointer)
-        {
             return;
-        }
 
         if (_secondContact is not null)
         {
-            if (!_isInteracting)
-            {
-                TryStartInteraction(e, _firstPosition);
-            }
-
             _firstContact = _secondContact;
             _firstPosition = _secondPosition;
             _secondContact = null;
             _previousDistance = 0;
-            _pressedPosition = _firstPosition;
-            _velocityTracker = new VelocityTracker();
+            ResetSingleContactTracking(e.Timestamp, _firstPosition);
             CapturePointer(_firstContact);
             e.Handled = true;
             return;
@@ -366,19 +457,33 @@ public class InputElementInteractionSource : IDisposable
         }
 
         var velocity = _velocityTracker?.GetFlingVelocity().PixelsPerSecond ?? Vector.Zero;
-        if (PositionXSourceMode is InteractionSourceMode.Disabled)
+        if (velocity == default)
+            velocity = _lastTrackedVelocity;
+        velocity = _activeDragAction switch
         {
+            ScrollGestureAction.Pan => velocity,
+            ScrollGestureAction.AutoScroll when ShouldAutoScrollVertically =>
+                velocity.WithX(0),
+            ScrollGestureAction.AutoScroll when PositionXSourceMode is not InteractionSourceMode.Disabled =>
+                velocity.WithY(0),
+            ScrollGestureAction.HorizontalScroll => velocity.WithY(0),
+            ScrollGestureAction.VerticalScroll => velocity.WithX(0),
+            _ => default
+        };
+
+        if (PositionXSourceMode is not InteractionSourceMode.EnabledWithInertia)
             velocity = velocity.WithX(0);
-        }
-
-        if (PositionYSourceMode is InteractionSourceMode.Disabled)
-        {
+        if (PositionYSourceMode is not InteractionSourceMode.EnabledWithInertia)
             velocity = velocity.WithY(0);
-        }
 
-        if (velocity != Vector.Zero)
+        var includeScaleVelocity = _hasScaleInput
+                                   && ScaleSourceMode is InteractionSourceMode.EnabledWithInertia;
+
+        if (velocity != default || includeScaleVelocity)
         {
-            _tracker.StartInertia(-new Point(velocity.X, velocity.Y));
+            _tracker.StartInertia(
+                -new Point(velocity.X * ScrollInputMultiplier, velocity.Y * ScrollInputMultiplier),
+                includeScaleVelocity);
         }
         else
         {
@@ -388,6 +493,16 @@ public class InputElementInteractionSource : IDisposable
         _firstContact?.Capture(null);
         ResetContacts();
         e.Handled = true;
+    }
+
+    private void ResetSingleContactTracking(ulong timestamp, Point position)
+    {
+        _pressedPosition = position;
+        _activeDragAction = ResolveAction(ScrollInputGesture.TouchDrag, _activeModifiers);
+        _velocityTracker = new VelocityTracker();
+        _velocityTracker.AddPosition(TimeSpan.FromMilliseconds(timestamp), default);
+        _lastTrackedVelocity = default;
+        _previousCenter = default;
     }
 
     private void ResetContacts()
@@ -400,172 +515,225 @@ public class InputElementInteractionSource : IDisposable
         _secondPosition = default;
         _previousDistance = 0;
         _previousCenter = default;
+        _activeDragAction = ScrollGestureAction.None;
+        _activeModifiers = default;
+        _lastTrackedVelocity = default;
+        _hasScaleInput = false;
         _isInteracting = false;
     }
 
-    private bool IsPrecisionTouchpadScroll(PointerWheelEventArgs e)
-    {
-        if (!IsTranslationEnabled)
-        {
-            return false;
-        }
-
-        return IsPrecisionTouchpadDelta(e.Delta.X) || IsPrecisionTouchpadDelta(e.Delta.Y);
-    }
+    private bool IsPrecisionTouchpadScroll(PointerWheelEventArgs e) =>
+        IsPrecisionTouchpadDelta(e.Delta.X) || IsPrecisionTouchpadDelta(e.Delta.Y);
 
     private static bool IsPrecisionTouchpadDelta(double delta)
     {
-        // There is no way to distinguish whether the mousewheel event is from precision touchpad or from mouse.
-        // However, deltas from original mouse wheel is often integers,
-        // so we can "distinguish" them by checking whether the delta's absolute value is close to an integer.
         var absoluteValue = Math.Abs(delta);
-        return !MathUtilities.AreClose(absoluteValue, (int)absoluteValue);
-    }
-
-    private void HandlePrecisionTouchpadScroll(PointerWheelEventArgs e)
-    {
-        var translationDelta = new Point(
-            PositionXSourceMode is InteractionSourceMode.Disabled ? 0 : e.Delta.X * TouchpadDeltaScale,
-            PositionYSourceMode is InteractionSourceMode.Disabled ? 0 : e.Delta.Y * TouchpadDeltaScale);
-
-        if (translationDelta == default)
-        {
-            return;
-        }
-
-        if (ShouldChainDuringInteraction(translationDelta) && ScaleSourceMode is not InteractionSourceMode.EnabledWithInertia)
-        {
-            return;
-        }
-
-        _tracker.BeginUserManipulation(e.GetPosition(_inputElement), e.Pointer);
-        _tracker.ApplyManipulationDelta(-translationDelta);
-        _tracker.CompleteUserManipulation();
-        e.Handled = true;
+        return absoluteValue is not 0 && !MathUtilities.AreClose(absoluteValue, (int)absoluteValue);
     }
 
     private void OnPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
-        if (!_isInteracting)
-        {
-            ResetContacts();
+        if (e.Pointer != _firstContact && e.Pointer != _secondContact)
             return;
-        }
 
-        if (e.Pointer == _firstContact || e.Pointer == _secondContact)
-        {
+        if (_isInteracting)
             _tracker.CompleteUserManipulation();
-            ResetContacts();
-        }
+
+        ResetContacts();
     }
 
     private static double GetDistance(Point a, Point b)
     {
         var dx = b.X - a.X;
         var dy = b.Y - a.Y;
-        return Math.Sqrt(dx * dx + dy * dy);
+        return Math.Sqrt((dx * dx) + (dy * dy));
     }
 
-    private static Point GetCenter(Point a, Point b)
-    {
-        return new Point((a.X + b.X) / 2.0, (a.Y + b.Y) / 2.0);
-    }
+    private static Point GetCenter(Point a, Point b) =>
+        new((a.X + b.X) / 2, (a.Y + b.Y) / 2);
 
     private bool ShouldStartManipulation(Vector delta, PointerType pointerType)
     {
         if (!IsTranslationEnabled)
-        {
             return false;
-        }
 
-        if (pointerType is not PointerType.Touch and not PointerType.Pen || ScaleSourceMode is not InteractionSourceMode.Disabled)
-        {
+        if (pointerType is not PointerType.Touch and not PointerType.Pen || _secondContact is not null)
             return true;
-        }
 
+        UpdateChainingTarget();
         var xDistance = PositionXSourceMode is InteractionSourceMode.Disabled ? 0 : Math.Abs(delta.X);
         var yDistance = PositionYSourceMode is InteractionSourceMode.Disabled ? 0 : Math.Abs(delta.Y);
 
-        if (xDistance > 0 && IsAtBoundaryForChaining(delta.X, _tracker.Position.X, _tracker.MinPosition.X, _tracker.MaxPosition.X, PositionXChainingMode, _hasHorizontalChainingTarget))
+        if (xDistance > 0
+            && IsAtBoundaryForChaining(
+                delta.X,
+                _tracker.Position.X,
+                _tracker.MinPosition.X,
+                _tracker.MaxPosition.X,
+                PositionXChainingMode,
+                HasHorizontalChainingTarget))
+        {
             xDistance = 0;
-        if (yDistance > 0 && IsAtBoundaryForChaining(delta.Y, _tracker.Position.Y, _tracker.MinPosition.Y, _tracker.MaxPosition.Y, PositionYChainingMode, _hasVerticalChainingTarget))
-            yDistance = 0;
+        }
 
-        return xDistance > _manipulationStartDistance || yDistance > _manipulationStartDistance;
+        if (yDistance > 0
+            && IsAtBoundaryForChaining(
+                delta.Y,
+                _tracker.Position.Y,
+                _tracker.MinPosition.Y,
+                _tracker.MaxPosition.Y,
+                PositionYChainingMode,
+                HasVerticalChainingTarget))
+        {
+            yDistance = 0;
+        }
+
+        return xDistance >= _manipulationStartDistance || yDistance >= _manipulationStartDistance;
     }
 
     private bool TryStartInteraction(PointerEventArgs e, Point position)
     {
         if (_isInteracting)
-        {
             return true;
-        }
 
-        if (!IsTranslationEnabled && ScaleSourceMode is InteractionSourceMode.Disabled)
-        {
+        var canPinch = _secondContact is not null
+                       && ResolveAction(ScrollInputGesture.TouchPinch, _activeModifiers) is ScrollGestureAction.Zoom
+                       && ScaleSourceMode is not InteractionSourceMode.Disabled;
+        if (!CanExecute(_activeDragAction) && !canPinch)
             return false;
-        }
 
-        var pointer = _firstContact ?? e.Pointer;
+        _tracker.BeginUserManipulation(position, e.Pointer);
+        CapturePointer(_firstContact);
+        CapturePointer(_secondContact);
         _isInteracting = true;
-        _tracker.BeginUserManipulation(position, pointer);
-        CapturePointer(pointer);
-        if (pointer != e.Pointer)
-        {
-            CapturePointer(e.Pointer);
-        }
-
         e.PreventGestureRecognition();
         e.Handled = true;
         return true;
     }
 
-    /// <summary>
-    /// Checks whether the tracker is at a boundary on the given axis and chaining should propagate
-    /// the input to the parent. A positive <paramref name="userDelta"/> means the tracker position
-    /// would decrease (toward <paramref name="min"/>); negative means it would increase (toward <paramref name="max"/>).
-    /// </summary>
-    private static bool IsAtBoundaryForChaining(double userDelta, double position, double min, double max, InteractionChainingMode chainingMode, bool hasChainingTarget)
+    private bool TryGetPressedAction(PointerPressedEventArgs e, out ScrollGestureAction action)
+    {
+        var gesture = e.Pointer.Type switch
+        {
+            PointerType.Touch or PointerType.Pen => ScrollInputGesture.TouchDrag,
+            PointerType.Mouse when e.Properties.IsLeftButtonPressed => ScrollInputGesture.MouseLeftDrag,
+            PointerType.Mouse when e.Properties.IsMiddleButtonPressed => ScrollInputGesture.MouseMiddleDrag,
+            PointerType.Mouse when e.Properties.IsRightButtonPressed => ScrollInputGesture.MouseRightDrag,
+            _ => (ScrollInputGesture?)null
+        };
+
+        action = gesture is { } value ? ResolveAction(value, e.KeyModifiers) : ScrollGestureAction.None;
+        if (action is not ScrollGestureAction.None && CanExecute(action))
+            return true;
+
+        if (e.Pointer.Type is PointerType.Touch or PointerType.Pen
+            && ResolveAction(ScrollInputGesture.TouchPinch, e.KeyModifiers) is ScrollGestureAction.Zoom
+            && ScaleSourceMode is not InteractionSourceMode.Disabled)
+        {
+            action = ScrollGestureAction.None;
+            return true;
+        }
+
+        return false;
+    }
+
+    private ScrollGestureAction ResolveAction(ScrollInputGesture gesture, KeyModifiers modifiers)
+        => ScrollGestureResolver.Resolve(GestureBindings, gesture, modifiers);
+
+    private bool CanExecute(ScrollGestureAction action) => action switch
+    {
+        ScrollGestureAction.Pan => IsTranslationEnabled,
+        ScrollGestureAction.AutoScroll => IsTranslationEnabled,
+        ScrollGestureAction.HorizontalScroll => PositionXSourceMode is not InteractionSourceMode.Disabled,
+        ScrollGestureAction.VerticalScroll => PositionYSourceMode is not InteractionSourceMode.Disabled,
+        ScrollGestureAction.Zoom => ScaleSourceMode is not InteractionSourceMode.Disabled,
+        _ => false
+    };
+
+    private static bool IsAtBoundaryForChaining(
+        double userDelta,
+        double position,
+        double min,
+        double max,
+        InteractionChainingMode chainingMode,
+        bool hasChainingTarget)
     {
         if (!CanChain(chainingMode, hasChainingTarget))
             return false;
 
         const double tolerance = 0.5;
-
-        if (userDelta > 0 && position <= min + tolerance)
-            return true;
-        if (userDelta < 0 && position >= max - tolerance)
-            return true;
-
-        return false;
+        return userDelta > 0 && position <= min + tolerance
+               || userDelta < 0 && position >= max - tolerance;
     }
 
-    private static bool CanChain(InteractionChainingMode chainingMode, bool hasChainingTarget)
-    {
-        return hasChainingTarget && chainingMode is not InteractionChainingMode.Never;
-    }
+    private static bool CanChain(InteractionChainingMode chainingMode, bool hasChainingTarget) =>
+        hasChainingTarget && chainingMode is not InteractionChainingMode.Never;
 
-    /// <summary>
-    /// During an active interaction, determines whether all enabled axes are at boundary
-    /// with chaining enabled, meaning the interaction should be handed off to the parent.
-    /// </summary>
-    private bool ShouldChainDuringInteraction(Point fingerDelta)
+    private bool ShouldChainDuringInteraction(Vector fingerDelta)
     {
+        UpdateChainingTarget();
         var xEnabled = PositionXSourceMode is not InteractionSourceMode.Disabled;
         var yEnabled = PositionYSourceMode is not InteractionSourceMode.Disabled;
 
-        var xAtBoundary = !xEnabled || fingerDelta.X == 0 ||
-            IsAtBoundaryForChaining(fingerDelta.X, _tracker.Position.X, _tracker.MinPosition.X, _tracker.MaxPosition.X, PositionXChainingMode, _hasHorizontalChainingTarget);
-        var yAtBoundary = !yEnabled || fingerDelta.Y == 0 ||
-            IsAtBoundaryForChaining(fingerDelta.Y, _tracker.Position.Y, _tracker.MinPosition.Y, _tracker.MaxPosition.Y, PositionYChainingMode, _hasVerticalChainingTarget);
+        var xAtBoundary = !xEnabled || fingerDelta.X is 0
+                                    || IsAtBoundaryForChaining(
+                                        fingerDelta.X,
+                                        _tracker.Position.X,
+                                        _tracker.MinPosition.X,
+                                        _tracker.MaxPosition.X,
+                                        PositionXChainingMode,
+                                        HasHorizontalChainingTarget);
+        var yAtBoundary = !yEnabled || fingerDelta.Y is 0
+                                    || IsAtBoundaryForChaining(
+                                        fingerDelta.Y,
+                                        _tracker.Position.Y,
+                                        _tracker.MinPosition.Y,
+                                        _tracker.MaxPosition.Y,
+                                        PositionYChainingMode,
+                                        HasVerticalChainingTarget);
 
         return xAtBoundary && yAtBoundary;
     }
 
-    private void CapturePointer(IPointer? pointer)
+    private void CapturePointer(IPointer? pointer) => pointer?.Capture(_inputElement);
+
+    private void TransferPointerToChainingTarget(IPointer? pointer, Vector fingerDelta)
     {
-        pointer?.Capture(_inputElement);
+        if (pointer is null)
+            return;
+
+        // Capture directly to the ancestor interaction source. Releasing to null raises
+        // PointerCaptureLost through the whole ancestor chain and clears the parent's pending touch.
+        var target = SelectChainingTarget(fingerDelta);
+        if (target is InputElement inputElement)
+        {
+            pointer.Capture(inputElement);
+            return;
+        }
+
+        pointer.Capture(null);
     }
+
+    private IScrollable? SelectChainingTarget(Vector fingerDelta)
+    {
+        if (fingerDelta.X is 0)
+            return _verticalChainingTarget;
+        if (fingerDelta.Y is 0)
+            return _horizontalChainingTarget;
+        if (ReferenceEquals(_horizontalChainingTarget, _verticalChainingTarget))
+            return _horizontalChainingTarget;
+        if (_horizontalChainingTarget is null)
+            return _verticalChainingTarget;
+        if (_verticalChainingTarget is null)
+            return _horizontalChainingTarget;
+
+        return Math.Abs(fingerDelta.X) >= Math.Abs(fingerDelta.Y) ? _horizontalChainingTarget : _verticalChainingTarget;
+    }
+
+    private bool IsContactCapturedByThisSource(IPointer pointer) =>
+        pointer.Captured is Visual captured
+        && _inputElement is Visual input
+        && (ReferenceEquals(captured, input) || input.IsVisualAncestorOf(captured));
 
     public void Dispose()
     {
@@ -580,5 +748,6 @@ public class InputElementInteractionSource : IDisposable
         _inputElement.RemoveHandler(InputElement.PointerReleasedEvent, OnPointerReleased);
         _inputElement.PointerCaptureLost -= OnPointerCaptureLost;
         _inputElement.PointerWheelChanged -= OnPointerWheelChanged;
+        GC.SuppressFinalize(this);
     }
 }

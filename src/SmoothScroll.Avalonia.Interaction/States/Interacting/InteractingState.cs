@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Input;
 
 namespace SmoothScroll.Avalonia.Interaction;
@@ -13,8 +13,15 @@ internal sealed class InteractingState : InteractionTrackerState
     private double _previousScale;
     private Point _previousOrigin;
     private Vector3D _position;
-    public InteractingState(ServerInteractionTracker interactionTracker) : base(interactionTracker)
+    private TimeSpan _previousScaleTimestamp;
+    private double _scaleVelocity;
+    private Point _scaleOrigin;
+    private bool _hasPreviousOrigin;
+    private readonly bool _allowOverscroll;
+
+    public InteractingState(ServerInteractionTracker interactionTracker, bool allowOverscroll) : base(interactionTracker)
     {
+        _allowOverscroll = allowOverscroll;
         _previousScale = interactionTracker.Scale;
         _position = GetOriginalPoint(interactionTracker.Position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
         EnterState();
@@ -37,17 +44,54 @@ internal sealed class InteractingState : InteractionTrackerState
 
     internal override void CompleteUserManipulation()
     {
-        _interactionTracker.ChangeState(new ActiveInputInertiaState(_interactionTracker, default, requestId: 0));
-    }
-
-    internal override void AddScaleVelocity(Point origin, double scaleDelta)
-    {
-        if (scaleDelta <= 0 || double.IsNaN(scaleDelta) || double.IsInfinity(scaleDelta))
+        var clampedPosition = Vector3D.Clamp(
+            _interactionTracker.Position,
+            _interactionTracker.MinPosition,
+            _interactionTracker.MaxPosition);
+        if (_interactionTracker.Position != clampedPosition)
         {
+            _interactionTracker.ChangeState(new InertiaState(
+                _interactionTracker,
+                positionVelocity: default,
+                scaleVelocity: 0,
+                scaleOrigin: default,
+                requestId: 0,
+                allowOverscroll: _allowOverscroll));
             return;
         }
 
-        var currentPosition = ApplyOriginTranslation(origin, _position, out var positionChanged);
+        _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId: 0));
+    }
+
+    internal override void AddScaleVelocity(Point origin, double scaleDelta, bool useInertia)
+    {
+        if (scaleDelta <= 0 || double.IsNaN(scaleDelta) || double.IsInfinity(scaleDelta))
+            return;
+
+        if (useInertia)
+        {
+            var now = _interactionTracker.Compositor.Clock.Elapsed;
+            var elapsed = _previousScaleTimestamp == default ? 0.2 : Math.Max((now - _previousScaleTimestamp).TotalSeconds, 1.0 / 240.0);
+            var instantaneousVelocity = Math.Log(scaleDelta) / elapsed;
+            _scaleVelocity = Math.Clamp(
+                _previousScaleTimestamp == default ? instantaneousVelocity : (_scaleVelocity * 0.65) + (instantaneousVelocity * 0.35),
+                -8,
+                8);
+            _previousScaleTimestamp = now;
+        }
+        else
+        {
+            _scaleVelocity = 0;
+            _previousScaleTimestamp = default;
+        }
+
+        _scaleOrigin = origin;
+
+        var currentPosition = _position;
+        var positionChanged = false;
+        var isOriginBaseline = !useInertia && scaleDelta is 1;
+        if (_hasPreviousOrigin && !isOriginBaseline)
+            currentPosition = ApplyOriginTranslation(origin, _position, out positionChanged);
 
         var targetScale = _previousScale * scaleDelta;
         var clampedScale = Math.Clamp(targetScale, _interactionTracker.MinScale, _interactionTracker.MaxScale);
@@ -70,6 +114,7 @@ internal sealed class InteractingState : InteractionTrackerState
         }
 
         _previousOrigin = origin;
+        _hasPreviousOrigin = true;
     }
 
     internal override void ApplyManipulationDelta(Vector translationDelta)
@@ -126,20 +171,47 @@ internal sealed class InteractingState : InteractionTrackerState
 
     private void UpdateTrackerPosition(Vector3D position)
     {
-        var modifiedPosition = GetElasticPoint(position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+        var modifiedPosition = _allowOverscroll ?
+            GetElasticPoint(
+                position,
+                _interactionTracker.MinPosition,
+                _interactionTracker.MaxPosition,
+                _interactionTracker.OverscrollElasticity) :
+            Vector3D.Clamp(position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
         _interactionTracker.SetPosition(modifiedPosition, requestId: 0);
     }
 
-    internal override void StartInertia(Vector linearVelocity)
+    internal override void StartInertia(Vector linearVelocity, bool includeScaleVelocity)
     {
-        _interactionTracker.ChangeState(new ActiveInputInertiaState(
+        _interactionTracker.ChangeState(new InertiaState(
             _interactionTracker,
             new Vector3D((float)linearVelocity.X, (float)linearVelocity.Y, 0),
-            requestId: 0));
+            includeScaleVelocity ? GetScaleReleaseVelocity() : 0,
+            _scaleOrigin,
+            requestId: 0,
+            allowOverscroll: _allowOverscroll));
     }
 
-    internal override void ApplyWheelDelta(Vector delta)
+    internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
+        if (useInertia)
+        {
+            // Wheel input can arrive before the pointer release reaches the composition thread.
+            _interactionTracker.ChangeState(new InertiaState(
+                _interactionTracker,
+                GetWheelImpulseVelocity(delta),
+                scaleVelocity: 0,
+                scaleOrigin: default,
+                requestId: 0));
+            return;
+        }
+
+        _position += new Vector3D(delta.X, delta.Y, 0);
+        _position = Vector3D.Clamp(
+            _position,
+            _interactionTracker.MinPosition,
+            _interactionTracker.MaxPosition);
+        _interactionTracker.SetPosition(_position, InteractionTrackerValuesChangedArgs.UserRequestId);
     }
 
     internal override void TryUpdatePositionWithAdditionalVelocity(Vector3D velocityInPixelsPerSecond, int requestId)
@@ -155,6 +227,15 @@ internal sealed class InteractingState : InteractionTrackerState
     internal override void ReceiveBoundsUpdate()
     {
         SyncPositionFromTracker();
+    }
+
+    private double GetScaleReleaseVelocity()
+    {
+        if (_previousScaleTimestamp == default)
+            return 0;
+
+        var idleSeconds = (_interactionTracker.Compositor.Clock.Elapsed - _previousScaleTimestamp).TotalSeconds;
+        return idleSeconds >= 0.12 ? 0 : _scaleVelocity * (1 - (idleSeconds / 0.12));
     }
 
     public static Vector3D GetElasticPoint(Vector3D current, Vector3D min, Vector3D max, double tension = Tension)

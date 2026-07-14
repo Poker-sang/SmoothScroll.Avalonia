@@ -74,7 +74,7 @@ public partial class InteractionTracker : CompositionObject
 
         animation.Target = nameof(Server.Scale);
         var id = NextRequestId();
-        QueueRequest(new StartAnimationRequest(id,animation, centerPoint));
+        QueueRequest(new StartAnimationRequest(id, animation, centerPoint));
         return id;
     }
 
@@ -97,22 +97,46 @@ public partial class InteractionTracker : CompositionObject
         QueueRequest(new ApplyManipulationDeltaRequest(id, translationDelta));
     }
 
-    internal void StartInertia(Point linearVelocity)
+    internal void StartInertia(Point linearVelocity, bool includeScaleVelocity)
     {
         var id = NextRequestId();
-        QueueRequest(new StartInertiaRequest(id, linearVelocity));
+        QueueRequest(new StartInertiaRequest(id, linearVelocity, includeScaleVelocity));
     }
 
-    internal void AddScaleVelocity(Point origin, double delta)
+    internal void AddScaleVelocity(Point origin, double delta, bool useInertia)
     {
         var id = NextRequestId();
-        QueueRequest(new AddScaleVelocityRequest(id, origin, delta));
+        QueueRequest(new AddScaleVelocityRequest(id, origin, delta, useInertia));
     }
 
-    internal void ApplyWheelDelta(Vector delta)
+    internal void ApplyWheelDelta(Vector delta, bool useInertia)
     {
         var id = NextRequestId();
-        QueueRequest(new ApplyWheelDeltaRequest(id, delta));
+        QueueRequest(new ApplyWheelDeltaRequest(id, delta, useInertia));
+    }
+
+    /// <summary>
+    /// Retargets the current position inertia without interrupting its state or animation.
+    /// </summary>
+    /// <param name="value">The new resting position.</param>
+    /// <returns>The identifier of the queued request.</returns>
+    /// <remarks>
+    /// The request is ignored when the tracker is not in its inertia state.
+    /// </remarks>
+    public int TryUpdatePositionInertiaRestingValue(Vector3D value)
+    {
+        var id = NextRequestId();
+        QueueRequest(new UpdateInertiaRestingPositionRequest(id, value));
+        return id;
+    }
+
+    public void ConfigurePhysics(double overscrollElasticity, double overscrollBounceRate)
+    {
+        var id = NextRequestId();
+        QueueRequest(new ConfigurePhysicsRequest(
+            id,
+            Math.Clamp(overscrollElasticity, 0, 1),
+            Math.Max(overscrollBounceRate, 0.01)));
     }
 
     internal void RaiseValuesChanged(Vector3D position, double scale, int requestId)
@@ -177,6 +201,7 @@ public partial class InteractionTracker : CompositionObject
 
         Compositor.PostServerJob(() => action(Server), false);
     }
+
     private int NextRequestId() => Interlocked.Increment(ref _requestId);
 
     private void QueueRequest(InteractionTrackerRequest request)
@@ -188,35 +213,44 @@ public partial class InteractionTracker : CompositionObject
     partial void SerializeRequests(BatchStreamWriter writer)
     {
         writer.Write(_pendingRequests.Count);
-        foreach(var request in _pendingRequests)
+        foreach (var request in _pendingRequests)
         {
             writer.WriteObject(request);
         }
+
         _pendingRequests.Clear();
     }
-    
 }
 
 internal record InteractionTrackerRequest(int RequestId);
-internal record TryUpdatePositionRequest(int RequestId, Vector3D Position, InteractionTrackerClampingOption ClampingOption) : InteractionTrackerRequest(RequestId);
-internal record TryUpdateScaleRequest(int RequestId, double Scale, Vector3D CenterPoint) : InteractionTrackerRequest(RequestId);
-internal record StartAnimationRequest(int RequestId, CompositionAnimation Animation, Vector3D? ScaleCenterPoint) : InteractionTrackerRequest(RequestId);
-internal record BeginUserManipulationRequest(int RequestId, Point Position, IPointer Pointer) : InteractionTrackerRequest(RequestId);
-internal record CompleteManipulationRequest(int RequestId) : InteractionTrackerRequest(RequestId);
-internal record ApplyManipulationDeltaRequest(int RequestId, Vector TranslationDelta) : InteractionTrackerRequest(RequestId);
-internal record StartInertiaRequest(int RequestId, Point LinearVelocity) : InteractionTrackerRequest(RequestId);
-internal record AddScaleVelocityRequest(int RequestId, Point Origin, double Delta) : InteractionTrackerRequest(RequestId);
-internal record ApplyWheelDeltaRequest(int RequestId, Vector Delta) : InteractionTrackerRequest(RequestId);
 
+internal record TryUpdatePositionRequest(int RequestId, Vector3D Position, InteractionTrackerClampingOption ClampingOption) : InteractionTrackerRequest(RequestId);
+
+internal record TryUpdateScaleRequest(int RequestId, double Scale, Vector3D CenterPoint) : InteractionTrackerRequest(RequestId);
+
+internal record StartAnimationRequest(int RequestId, CompositionAnimation Animation, Vector3D? ScaleCenterPoint) : InteractionTrackerRequest(RequestId);
+
+internal record BeginUserManipulationRequest(int RequestId, Point Position, IPointer Pointer) : InteractionTrackerRequest(RequestId);
+
+internal record CompleteManipulationRequest(int RequestId) : InteractionTrackerRequest(RequestId);
+
+internal record ApplyManipulationDeltaRequest(int RequestId, Vector TranslationDelta) : InteractionTrackerRequest(RequestId);
+
+internal record StartInertiaRequest(int RequestId, Point LinearVelocity, bool IncludeScaleVelocity) : InteractionTrackerRequest(RequestId);
+
+internal record AddScaleVelocityRequest(int RequestId, Point Origin, double Delta, bool UseInertia) : InteractionTrackerRequest(RequestId);
+
+internal record ApplyWheelDeltaRequest(int RequestId, Vector Delta, bool UseInertia) : InteractionTrackerRequest(RequestId);
+
+internal record UpdateInertiaRestingPositionRequest(int RequestId, Vector3D Position) : InteractionTrackerRequest(RequestId);
+
+internal record ConfigurePhysicsRequest(int RequestId, double OverscrollElasticity, double OverscrollBounceRate) : InteractionTrackerRequest(RequestId);
 
 public static class CompositorExtensions
 {
     extension(Compositor compositor)
     {
         public InteractionTracker CreateInteractionTracker(IInteractionTrackerOwner? owner) =>
-            new(compositor, new ServerInteractionTracker(compositor.Server))
-            {
-                Owner = owner
-            };
+            new(compositor, new ServerInteractionTracker(compositor.Server)) { Owner = owner };
     }
 }

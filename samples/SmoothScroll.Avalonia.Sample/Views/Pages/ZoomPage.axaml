@@ -12,15 +12,23 @@
     <Panel>
         <controls:ScrollView
             x:Name="ScrollView"
-            HorizontalContentAlignment="Stretch"
-            VerticalContentAlignment="Stretch"
+            HorizontalContentAlignment="Center"
+            VerticalContentAlignment="Center"
             HorizontalScrollBarVisibility="Hidden"
             IsZoomEnabled="True"
             VerticalScrollBarVisibility="Hidden">
-            <Grid>
-                <Slider ZIndex="1"/>
+            <Grid
+                Width="400"
+                Height="300"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <Grid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Context menu works" />
+                    </ContextMenu>
+                </Grid.ContextMenu>
+                <Slider ZIndex="1" />
                 <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" Stretch="UniformToFill" />
-
             </Grid>
         </controls:ScrollView>
         <Border

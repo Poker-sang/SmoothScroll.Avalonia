@@ -1,10 +1,6 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core;
-using Avalonia.Data.Core.Plugins;
-using System.Linq;
 using Avalonia.Markup.Xaml;
-using SmoothScroll.Avalonia.Sample.ViewModels;
 using SmoothScroll.Avalonia.Sample.Views;
 using System.Diagnostics;
 

@@ -25,15 +25,6 @@ using Vector = Avalonia.Vector;
 
 namespace SmoothScroll.Avalonia.Controls;
 
-[Flags]
-public enum ScrollFeaturesEnum
-{
-    None = 0,
-    MousePressedScroll = 1,
-    MousePressedScrollEnertia = 2,
-    WheelSwapDirections = 4,
-}
-
 /// <summary>
 /// Presents a scrolling view of content inside a <see cref="ScrollViewer"/>.
 /// </summary>
@@ -42,9 +33,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     private const double EdgeDetectionTolerance = 0.1;
     private const int ArrangeTimerIntervalMs = 40;
     private const int ArrangeTimerIdleTimeoutMs = 160;
-
-    public static readonly AttachedProperty<ScrollFeaturesEnum> ScrollFeaturesProperty =
-        AvaloniaProperty.RegisterAttached<ScrollPresenter, Control, ScrollFeaturesEnum>("ScrollFeatures", defaultValue: ScrollFeaturesEnum.None);
+    private const int BringIntoViewAnimationDurationMilliseconds = 500;
 
     /// <summary>
     /// Defines the <see cref="CanHorizontallyScroll"/> property.
@@ -59,11 +48,26 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         AvaloniaProperty.Register<ScrollPresenter, bool>(nameof(CanVerticallyScroll));
 
     /// <summary>
+    /// Defines the <see cref="ComputedHorizontalScrollMode"/> property.
+    /// </summary>
+    public static readonly DirectProperty<ScrollPresenter, ScrollMode> ComputedHorizontalScrollModeProperty =
+        AvaloniaProperty.RegisterDirect<ScrollPresenter, ScrollMode>(
+            nameof(ComputedHorizontalScrollMode),
+            presenter => presenter.ComputedHorizontalScrollMode);
+
+    /// <summary>
+    /// Defines the <see cref="ComputedVerticalScrollMode"/> property.
+    /// </summary>
+    public static readonly DirectProperty<ScrollPresenter, ScrollMode> ComputedVerticalScrollModeProperty =
+        AvaloniaProperty.RegisterDirect<ScrollPresenter, ScrollMode>(
+            nameof(ComputedVerticalScrollMode),
+            presenter => presenter.ComputedVerticalScrollMode);
+
+    /// <summary>
     /// Defines the <see cref="Extent"/> property.
     /// </summary>
     public static readonly DirectProperty<ScrollPresenter, Size> ExtentProperty =
-        ScrollViewer.ExtentProperty.AddOwner<ScrollPresenter>(
-            o => o.Extent);
+        ScrollViewer.ExtentProperty.AddOwner<ScrollPresenter>(o => o.Extent);
 
     /// <summary>
     /// Defines the <see cref="Offset"/> property.
@@ -75,8 +79,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// Defines the <see cref="Viewport"/> property.
     /// </summary>
     public static readonly DirectProperty<ScrollPresenter, Size> ViewportProperty =
-        ScrollViewer.ViewportProperty.AddOwner<ScrollPresenter>(
-            o => o.Viewport);
+        ScrollViewer.ViewportProperty.AddOwner<ScrollPresenter>(o => o.Viewport);
 
     /// <summary>
     /// Defines the <see cref="HorizontalSnapPointsType"/> property.
@@ -108,18 +111,55 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     public static readonly StyledProperty<bool> IsScrollChainingEnabledProperty =
         ScrollViewer.IsScrollChainingEnabledProperty.AddOwner<ScrollPresenter>();
 
+    /// <summary>
+    /// Defines the <see cref="HorizontalAnchorRatio"/> property.
+    /// </summary>
+    public static readonly StyledProperty<double> HorizontalAnchorRatioProperty =
+        ScrollView.HorizontalAnchorRatioProperty.AddOwner<ScrollPresenter>();
+
+    /// <summary>
+    /// Defines the <see cref="VerticalAnchorRatio"/> property.
+    /// </summary>
+    public static readonly StyledProperty<double> VerticalAnchorRatioProperty =
+        ScrollView.VerticalAnchorRatioProperty.AddOwner<ScrollPresenter>();
+
+    /// <summary>
+    /// Defines the <see cref="GestureBindings"/> property.
+    /// </summary>
+    public static readonly StyledProperty<ScrollGestureBindings> GestureBindingsProperty =
+        AvaloniaProperty.Register<ScrollPresenter, ScrollGestureBindings>(nameof(GestureBindings));
+
+    public static readonly StyledProperty<double> ScrollInputMultiplierProperty =
+        AvaloniaProperty.Register<ScrollPresenter, double>(nameof(ScrollInputMultiplier), 1);
+
+    public static readonly StyledProperty<double> ZoomInputMultiplierProperty =
+        AvaloniaProperty.Register<ScrollPresenter, double>(nameof(ZoomInputMultiplier), 1);
+
+    public static readonly StyledProperty<double> ScrollInertiaDecayRateProperty =
+        AvaloniaProperty.Register<ScrollPresenter, double>(
+            nameof(ScrollInertiaDecayRate),
+            ScrollPhysicsDefaults.LegacyWheelAndZoomInertiaDecayRate);
+
+    public static readonly StyledProperty<double> ZoomInertiaDecayRateProperty =
+        AvaloniaProperty.Register<ScrollPresenter, double>(
+            nameof(ZoomInertiaDecayRate),
+            ScrollPhysicsDefaults.LegacyWheelAndZoomInertiaDecayRate);
+
+    public static readonly StyledProperty<double> OverscrollElasticityProperty =
+        AvaloniaProperty.Register<ScrollPresenter, double>(nameof(OverscrollElasticity), 0.5);
+
+    public static readonly StyledProperty<double> OverscrollBounceRateProperty =
+        AvaloniaProperty.Register<ScrollPresenter, double>(nameof(OverscrollBounceRate), 1);
+
     public event EventHandler<ScrollAnimationStartingEventArgs>? ScrollAnimationStarting;
 
-    //private ScrollFeaturesEnum _scrollFeatures = ScrollFeaturesEnum.None;
-    private Interaction.InteractionTracker? _interactionTracker;
+    private InteractionTracker? _interactionTracker;
     private InputElementInteractionSource? _interactionSource;
     private CompositionAnimationGroup? _animationGroup;
     private bool _compositionUpdate;
     private bool _scaleChanged;
     private long? _requestId;
     private bool _arranging;
-    private Size _extent;
-    private Size _viewport;
     private HashSet<Control>? _anchorCandidates;
     private Control? _anchorElement;
     private Rect _anchorElementBounds;
@@ -141,13 +181,31 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     private bool _hasPendingArrange;
     private long _lastScrollActivityTick;
     private bool _synchronizingOwnerOffset;
+    private ScrollView? _scrollViewOwner;
+    private Vector _trackerPosition;
+    private ScrollChangeSource _changeSource = ScrollChangeSource.Layout;
+    private ScrollMode _computedHorizontalScrollMode = ScrollMode.Disabled;
+    private ScrollMode _computedVerticalScrollMode = ScrollMode.Disabled;
+
+    private bool IsScrollViewerHost => _scrollViewOwner is null && _owner is not null;
+
+    internal bool HasPendingArrange => _hasPendingArrange;
+
     /// <summary>
     /// Initializes static members of the <see cref="ScrollPresenter"/> class.
     /// </summary>
     static ScrollPresenter()
     {
         ClipToBoundsProperty.OverrideDefaultValue(typeof(ScrollPresenter), true);
-        AffectsMeasure<ScrollContentPresenter>(CanHorizontallyScrollProperty, CanVerticallyScrollProperty);
+        AffectsMeasure<ScrollPresenter>(
+            CanHorizontallyScrollProperty,
+            CanVerticallyScrollProperty,
+            IsZoomEnabledProperty,
+            IsHorizontalMeasureInfiniteProperty,
+            IsVerticalMeasureInfiniteProperty,
+            HorizontalScrollModeProperty,
+            VerticalScrollModeProperty);
+        AffectsArrange<ScrollPresenter>(HorizontalAnchorRatioProperty, VerticalAnchorRatioProperty);
     }
 
     /// <summary>
@@ -155,22 +213,10 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// </summary>
     public ScrollPresenter()
     {
-        _arrangeTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(ArrangeTimerIntervalMs),
-        };
+        SetCurrentValue(GestureBindingsProperty, ScrollGestureBindings.CreateDefault());
+        _arrangeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ArrangeTimerIntervalMs), };
         _arrangeTimer.Tick += ArrangeTimerTick;
         AddHandler(RequestBringIntoViewEvent, BringIntoViewRequested);
-    }
-
-    public static ScrollFeaturesEnum GetScrollFeatures(Control element)
-    {
-        return element.GetValue(ScrollFeaturesProperty);
-    }
-
-    public static void SetScrollFeatures(Control element, ScrollFeaturesEnum value)
-    {
-        element.SetValue(ScrollFeaturesProperty, value);
     }
 
     /// <summary>
@@ -179,7 +225,6 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     public bool CanHorizontallyScroll
     {
         get => GetValue(CanHorizontallyScrollProperty);
-        [Obsolete("The CanHorizontallyScroll setter is deprecated and is for internal use only. Use HorizontalScrollMode instead.")]
         set => SetValue(CanHorizontallyScrollProperty, value);
     }
 
@@ -189,17 +234,28 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     public bool CanVerticallyScroll
     {
         get => GetValue(CanVerticallyScrollProperty);
-        [Obsolete("The CanVerticallyScrollProperty setter is deprecated and is for internal use only. Use VerticalScrollMode instead.")]
         set => SetValue(CanVerticallyScrollProperty, value);
     }
+
+    /// <summary>
+    /// Gets the effective horizontal user-input mode.
+    /// </summary>
+    /// <remarks>This property is always <see cref="ScrollMode.Enabled"/> or <see cref="ScrollMode.Disabled"/>.</remarks>
+    public ScrollMode ComputedHorizontalScrollMode => _computedHorizontalScrollMode;
+
+    /// <summary>
+    /// Gets the effective vertical user-input mode.
+    /// </summary>
+    /// <remarks>This property is always <see cref="ScrollMode.Enabled"/> or <see cref="ScrollMode.Disabled"/>.</remarks>
+    public ScrollMode ComputedVerticalScrollMode => _computedVerticalScrollMode;
 
     /// <summary>
     /// Gets the extent of the scrollable content.
     /// </summary>
     public Size Extent
     {
-        get => _extent;
-        private set => SetAndRaise(ExtentProperty, ref _extent, value);
+        get;
+        private set => SetAndRaise(ExtentProperty, ref field, value);
     }
 
     /// <summary>
@@ -216,8 +272,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// </summary>
     public Size Viewport
     {
-        get => _viewport;
-        private set => SetAndRaise(ViewportProperty, ref _viewport, value);
+        get;
+        private set => SetAndRaise(ViewportProperty, ref field, value);
     }
 
     /// <summary>
@@ -271,6 +327,51 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     }
 
     /// <summary>
+    /// Gets or sets the unique gesture-and-modifier mappings used for pan, scroll, and zoom input.
+    /// </summary>
+    public ScrollGestureBindings GestureBindings
+    {
+        get => GetValue(GestureBindingsProperty);
+        set => SetValue(GestureBindingsProperty, value);
+    }
+
+    public double ScrollInputMultiplier
+    {
+        get => GetValue(ScrollInputMultiplierProperty);
+        set => SetValue(ScrollInputMultiplierProperty, value);
+    }
+
+    public double ZoomInputMultiplier
+    {
+        get => GetValue(ZoomInputMultiplierProperty);
+        set => SetValue(ZoomInputMultiplierProperty, value);
+    }
+
+    public double ScrollInertiaDecayRate
+    {
+        get => GetValue(ScrollInertiaDecayRateProperty);
+        set => SetValue(ScrollInertiaDecayRateProperty, value);
+    }
+
+    public double ZoomInertiaDecayRate
+    {
+        get => GetValue(ZoomInertiaDecayRateProperty);
+        set => SetValue(ZoomInertiaDecayRateProperty, value);
+    }
+
+    public double OverscrollElasticity
+    {
+        get => GetValue(OverscrollElasticityProperty);
+        set => SetValue(OverscrollElasticityProperty, value);
+    }
+
+    public double OverscrollBounceRate
+    {
+        get => GetValue(OverscrollBounceRateProperty);
+        set => SetValue(OverscrollBounceRateProperty, value);
+    }
+
+    /// <summary>
     /// Gets or sets the minimum zoom factor.
     /// </summary>
     [GeneratedStyledProperty(0.1)]
@@ -295,10 +396,16 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     public partial bool IsZoomEnabled { get; set; }
 
     /// <summary>
-    /// Gets or sets a value that indicates whether the content prefers to scroll horizontally or vertically.
+    /// Gets or sets whether the child is measured with an infinite horizontal constraint.
     /// </summary>
-    [GeneratedStyledProperty(ScrollContentOrientation.Vertical)]
-    public partial ScrollContentOrientation ContentOrientation { get; set; }
+    [GeneratedStyledProperty]
+    public partial bool IsHorizontalMeasureInfinite { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the child is measured with an infinite vertical constraint.
+    /// </summary>
+    [GeneratedStyledProperty(true)]
+    public partial bool IsVerticalMeasureInfinite { get; set; }
 
     /// <summary>
     /// Gets or sets a value that determines how manipulation input influences scrolling behavior on the horizontal axis.
@@ -312,15 +419,52 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     [GeneratedStyledProperty(ScrollMode.Auto)]
     public partial ScrollMode VerticalScrollMode { get; set; }
 
-    /// <inheritdoc/>
-    Control? IScrollAnchorProvider.CurrentAnchor
+    /// <summary>
+    /// Gets or sets the horizontal viewport ratio used for automatic anchor selection.
+    /// </summary>
+    /// <remarks>
+    /// Values are coerced to <c>[0, 1]</c>. Zero represents the left edge, one represents the right edge,
+    /// and <see cref="double.NaN"/> disables horizontal anchoring.
+    /// </remarks>
+    public double HorizontalAnchorRatio
     {
-        get
-        {
-            EnsureAnchorElementSelection();
-            return _anchorElement;
-        }
+        get => GetValue(HorizontalAnchorRatioProperty);
+        set => SetValue(HorizontalAnchorRatioProperty, value);
     }
+
+    /// <summary>
+    /// Gets or sets the vertical viewport ratio used for automatic anchor selection.
+    /// </summary>
+    /// <remarks>
+    /// Values are coerced to <c>[0, 1]</c>. Zero represents the top edge, one represents the bottom edge,
+    /// and <see cref="double.NaN"/> disables vertical anchoring.
+    /// </remarks>
+    public double VerticalAnchorRatio
+    {
+        get => GetValue(VerticalAnchorRatioProperty);
+        set => SetValue(VerticalAnchorRatioProperty, value);
+    }
+
+    /// <summary>
+    /// Gets the anchor candidate selected by the most recently completed layout pass.
+    /// </summary>
+    public Control? CurrentAnchor => _anchorElement;
+
+    Control? IScrollAnchorProvider.CurrentAnchor => CurrentAnchor;
+
+    /// <summary>
+    /// Registers a visual descendant as an automatic anchor candidate.
+    /// </summary>
+    /// <param name="element">The descendant to register.</param>
+    public void RegisterAnchorCandidate(Control element) =>
+        ((IScrollAnchorProvider)this).RegisterAnchorCandidate(element);
+
+    /// <summary>
+    /// Removes a previously registered automatic anchor candidate.
+    /// </summary>
+    /// <param name="element">The candidate to remove.</param>
+    public void UnregisterAnchorCandidate(Control element) =>
+        ((IScrollAnchorProvider)this).UnregisterAnchorCandidate(element);
 
     /// <summary>
     /// Attempts to bring a portion of the target visual into view by scrolling the content.
@@ -328,68 +472,62 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// <param name="target">The target visual.</param>
     /// <param name="targetRect">The portion of the target visual to bring into view.</param>
     /// <returns>True if the scroll offset was changed; otherwise false.</returns>
-    public bool BringDescendantIntoView(Visual target, Rect targetRect)
+    public bool BringDescendantIntoView(Visual target, Rect targetRect) =>
+        BringDescendantIntoView(target, targetRect, isAnimated: false);
+
+    /// <summary>
+    /// Attempts to bring a portion of a descendant visual into view by scrolling the content.
+    /// </summary>
+    /// <param name="target">The target visual.</param>
+    /// <param name="targetRect">The portion of the target visual to bring into view.</param>
+    /// <param name="isAnimated">Whether the scroll transition should be animated.</param>
+    /// <returns><see langword="true"/> when the target requires a scroll request; otherwise <see langword="false"/>.</returns>
+    public bool BringDescendantIntoView(Visual target, Rect targetRect, bool isAnimated)
     {
-        if (Child?.IsEffectivelyVisible != true)
-        {
+        if (Child is not { IsEffectivelyVisible: true } child
+            || (!ReferenceEquals(target, child) && !child.IsVisualAncestorOf(target)))
             return false;
-        }
 
-        var control = target as Control;
-
-        var transform = target.TransformToVisual(Child);
-
-        if (transform == null)
-        {
+        var transform = target.TransformToVisual(child);
+        if (transform is null)
             return false;
-        }
 
-        var rectangle = targetRect.TransformToAABB(transform.Value).Deflate(new Thickness(Child.Margin.Left, Child.Margin.Top, 0, 0));
-        Rect viewport = new Rect(Offset.X, Offset.Y, Viewport.Width, Viewport.Height);
+        var rectangle = TransformTargetRectangle(
+            targetRect.TransformToAABB(transform.Value),
+            child.Margin + Padding,
+            ZoomFactor);
+        var viewport = new Rect(Offset.X, Offset.Y, Viewport.Width, Viewport.Height);
 
-        double minX = ComputeScrollOffsetWithMinimalScroll(viewport.Left, viewport.Right, rectangle.Left, rectangle.Right);
-        double minY = ComputeScrollOffsetWithMinimalScroll(viewport.Top, viewport.Bottom, rectangle.Top, rectangle.Bottom);
-        var endPosition = new Vector(minX, minY);
-
+        var minX = ComputeScrollOffsetWithMinimalScroll(viewport.Left, viewport.Right, rectangle.Left, rectangle.Right);
+        var minY = ComputeScrollOffsetWithMinimalScroll(viewport.Top, viewport.Bottom, rectangle.Top, rectangle.Bottom);
+        var endPosition = ClampOffsetToEnabledAxes(new Vector(minX, minY));
         if (Offset.NearlyEquals(endPosition))
-        {
             return false;
-        }
 
         var startingPosition = Offset;
-
-        if (GetCompositionVisual()?.Compositor is { } compositor)
+        if (!isAnimated || _interactionTracker is null || GetCompositionVisual() is not { } visual)
         {
-            var targetVerticalPosition = endPosition.Y;
-            var deltaVerticalPosition = endPosition.Y - startingPosition.Y;
-            var animation = compositor.CreateVector3DKeyFrameAnimation();
-            animation.Duration = TimeSpan.FromMilliseconds(500);
-
-            // First keyframe with a quick dip.
-            if (Math.Abs(deltaVerticalPosition) > 5000)
-            {
-                animation.InsertKeyFrame(
-                    0.0001f,
-                    new Vector3D(endPosition.X, targetVerticalPosition - Math.Clamp(deltaVerticalPosition, -5000, 5000), 0),
-                    new StepEasing()); // Easing function for sudden change
-            }
-
-            animation.InsertKeyFrame(
-                1f,
-                new Vector3D(endPosition.X, targetVerticalPosition, 0),
-                new CircularEaseOut());
-            var args = new ScrollAnimationStartingEventArgs(animation, startingPosition, endPosition);
-            ScrollAnimationStarting?.Invoke(this, args);
-            _interactionTracker?.TryUpdatePositionWithAnimation(args.Animation);
+            ScrollTo(endPosition, isAnimated: false, ScrollChangeSource.Programmatic);
+            return true;
         }
 
-        // TODO: Allow disabling animation and directly setting the offset.
-        // SetCurrentValue(OffsetProperty, offset);
-
-        // It's possible that the Offset coercion has changed the offset back to its previous value,
-        // this is common for floating point rounding errors.
-        return !Offset.NearlyEquals(startingPosition);
+        var animation = visual.Compositor.CreateVector3DKeyFrameAnimation();
+        animation.Duration = TimeSpan.FromMilliseconds(BringIntoViewAnimationDurationMilliseconds);
+        var trackerEndPosition = ToTrackerPosition(endPosition, CalculateScrollableArea(ZoomFactor));
+        animation.InsertKeyFrame(1f, new Vector3D(trackerEndPosition.X, trackerEndPosition.Y, 0), new CircularEaseOut());
+        var args = new ScrollAnimationStartingEventArgs(animation, startingPosition, endPosition);
+        ScrollAnimationStarting?.Invoke(this, args);
+        _changeSource = ScrollChangeSource.Programmatic;
+        _requestId = _interactionTracker.TryUpdatePositionWithAnimation(args.Animation);
+        return true;
     }
+
+    private static Rect TransformTargetRectangle(Rect rectangle, Thickness contentMargin, double scale) =>
+        new(
+            (rectangle.X + contentMargin.Left) * scale,
+            (rectangle.Y + contentMargin.Top) * scale,
+            rectangle.Width * scale,
+            rectangle.Height * scale);
 
     /// <summary>
     /// Computes the closest offset to ensure most of the child is visible in the viewport along an axis.
@@ -443,7 +581,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     protected override void OnLoaded(RoutedEventArgs e)
     {
-        AttachToScrollViewer();
+        if (_scrollViewOwner is null)
+            AttachToScrollViewer();
         Initialize();
         base.OnLoaded(e);
     }
@@ -478,10 +617,9 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         }
 
         var scrollableArea = CalculateScrollableArea(ZoomFactor);
-        var initialPosition = Vector3D.Clamp(
-            new Vector3D(Offset.X, Offset.Y, 0),
-            new Vector3D(scrollableArea.MinPosition.X, scrollableArea.MinPosition.Y, 0),
-            new Vector3D(scrollableArea.MaxPosition.X, scrollableArea.MaxPosition.Y, 0));
+        var logicalPosition = ToTrackerPosition(Offset, scrollableArea);
+        var initialPosition = new Vector3D(logicalPosition.X, logicalPosition.Y, 0);
+        _trackerPosition = logicalPosition;
 
         _interactionTracker = compositionVisual!.Compositor.CreateInteractionTracker(this);
         _interactionTracker.Position = initialPosition;
@@ -521,6 +659,9 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// </remarks>
     internal void AttachToScrollViewer()
     {
+        if (_scrollViewOwner is not null || TemplatedParent is ScrollView)
+            return;
+
         var owner = this.FindAncestorOfType<ScrollViewer>();
 
         if (owner == null)
@@ -539,22 +680,87 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         _ownerSubscriptions?.Dispose();
         _owner = owner;
 
-        IDisposable?[] subscriptionDisposables = new IDisposable?[]
+        // The smooth ScrollViewer theme supplies the four scrolling semantics below.
+        // Keep owner bindings as a fallback for custom themes that omit those setters.
+        var subscriptionDisposables = new IDisposable?[]
         {
-            owner is ScrollView ? null : IfUnset(CanHorizontallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.HorizontalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
-            owner is ScrollView ? null : IfUnset(CanVerticallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.VerticalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
+            IfUnset(CanHorizontallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.HorizontalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
+            IfUnset(CanVerticallyScrollProperty, p => Bind(p, owner.GetObservable(ScrollViewer.VerticalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
+            IfUnset(IsHorizontalMeasureInfiniteProperty, p => Bind(p, owner.GetObservable(ScrollViewer.HorizontalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
+            IfUnset(IsVerticalMeasureInfiniteProperty, p => Bind(p, owner.GetObservable(ScrollViewer.VerticalScrollBarVisibilityProperty, NotDisabled), BindingPriority.Template)),
+            IfUnset(HorizontalScrollModeProperty, p => Bind(p, owner.GetObservable(ScrollViewer.HorizontalScrollBarVisibilityProperty, ToScrollMode), BindingPriority.Template)),
+            IfUnset(VerticalScrollModeProperty, p => Bind(p, owner.GetObservable(ScrollViewer.VerticalScrollBarVisibilityProperty, ToScrollMode), BindingPriority.Template)),
             IfUnset(OffsetProperty, p => Bind(p, owner.GetBindingObservable(ScrollViewer.OffsetProperty), BindingPriority.Template)),
             IfUnset(HorizontalContentAlignmentProperty, p => Bind(p, owner.GetBindingObservable(ContentControl.HorizontalContentAlignmentProperty), BindingPriority.Template)),
             IfUnset(VerticalContentAlignmentProperty, p => Bind(p, owner.GetBindingObservable(ContentControl.VerticalContentAlignmentProperty), BindingPriority.Template)),
             IfUnset(IsScrollChainingEnabledProperty, p => Bind(p, owner.GetBindingObservable(ScrollViewer.IsScrollChainingEnabledProperty), BindingPriority.Template)),
             IfUnset(ContentProperty, p => Bind(p, owner.GetBindingObservable(ContentProperty), BindingPriority.Template)),
-        }.Where(d => d != null).Cast<IDisposable>().ToArray();
+        }.OfType<IDisposable>().ToArray();
 
         _ownerSubscriptions = new CompositeDisposable(subscriptionDisposables);
 
         static bool NotDisabled(ScrollBarVisibility v) => v != ScrollBarVisibility.Disabled;
 
+        static ScrollMode ToScrollMode(ScrollBarVisibility v) =>
+            v == ScrollBarVisibility.Disabled ? ScrollMode.Disabled : ScrollMode.Enabled;
+
         IDisposable? IfUnset<T>(T property, Func<T, IDisposable> func) where T : AvaloniaProperty => IsSet(property) ? null : func(property);
+    }
+
+    internal void AttachToScrollView(ScrollView owner)
+    {
+        if (ReferenceEquals(_scrollViewOwner, owner))
+            return;
+
+        _ownerSubscriptions?.Dispose();
+        _ownerSubscriptions = null;
+        _owner = null;
+        _scrollViewOwner = owner;
+        UpdateOwnerConfiguration(owner);
+        SetOffsetFromOwner(owner.Offset, ScrollChangeSource.Programmatic);
+    }
+
+    internal void DetachFromScrollView(ScrollView owner)
+    {
+        if (ReferenceEquals(_scrollViewOwner, owner))
+            _scrollViewOwner = null;
+    }
+
+    internal void UpdateOwnerConfiguration(ScrollView owner)
+    {
+        if (!ReferenceEquals(_scrollViewOwner, owner))
+            return;
+
+        SetCurrentValue(MinZoomFactorProperty, owner.MinZoomFactor);
+        SetCurrentValue(MaxZoomFactorProperty, owner.MaxZoomFactor);
+        SetCurrentValue(ZoomFactorProperty, owner.ZoomFactor);
+        SetCurrentValue(IsZoomEnabledProperty, owner.IsZoomEnabled);
+        SetCurrentValue(IsHorizontalMeasureInfiniteProperty, owner.IsHorizontalMeasureInfinite);
+        SetCurrentValue(IsVerticalMeasureInfiniteProperty, owner.IsVerticalMeasureInfinite);
+        SetCurrentValue(HorizontalScrollModeProperty, owner.HorizontalScrollMode);
+        SetCurrentValue(VerticalScrollModeProperty, owner.VerticalScrollMode);
+        SetCurrentValue(HorizontalAnchorRatioProperty, owner.HorizontalAnchorRatio);
+        SetCurrentValue(VerticalAnchorRatioProperty, owner.VerticalAnchorRatio);
+        SetCurrentValue(IsScrollChainingEnabledProperty, owner.IsScrollChainingEnabled);
+        SetCurrentValue(ScrollViewer.IsScrollInertiaEnabledProperty, owner.IsScrollInertiaEnabled);
+        SetCurrentValue(HorizontalSnapPointsTypeProperty, owner.HorizontalSnapPointsType);
+        SetCurrentValue(VerticalSnapPointsTypeProperty, owner.VerticalSnapPointsType);
+        SetCurrentValue(HorizontalSnapPointsAlignmentProperty, owner.HorizontalSnapPointsAlignment);
+        SetCurrentValue(VerticalSnapPointsAlignmentProperty, owner.VerticalSnapPointsAlignment);
+        SetCurrentValue(GestureBindingsProperty, owner.GestureBindings);
+        SetCurrentValue(ScrollInputMultiplierProperty, owner.ScrollInputMultiplier);
+        SetCurrentValue(ZoomInputMultiplierProperty, owner.ZoomInputMultiplier);
+        SetCurrentValue(ScrollInertiaDecayRateProperty, owner.ScrollInertiaDecayRate);
+        SetCurrentValue(ZoomInertiaDecayRateProperty, owner.ZoomInertiaDecayRate);
+        SetCurrentValue(OverscrollElasticityProperty, owner.OverscrollElasticity);
+        SetCurrentValue(OverscrollBounceRateProperty, owner.OverscrollBounceRate);
+        UpdateInteractionOptions();
+    }
+
+    internal void SetOffsetFromOwner(Vector offset, ScrollChangeSource source)
+    {
+        _changeSource = source;
+        SetCurrentValue(OffsetProperty, offset);
     }
 
     /// <inheritdoc/>
@@ -569,6 +775,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         _anchorCandidates ??= new();
         _anchorCandidates.Add(element);
         _isAnchorElementDirty = true;
+        InvalidateArrange();
     }
 
     /// <inheritdoc/>
@@ -576,6 +783,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     {
         _anchorCandidates?.Remove(element);
         _isAnchorElementDirty = true;
+        InvalidateArrange();
 
         if (_anchorElement == element)
         {
@@ -593,10 +801,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
         var availableWithPadding = availableSize.Deflate(Padding);
         var constraint = new Size(
-            ContentOrientation is ScrollContentOrientation.Horizontal or ScrollContentOrientation.Both
-                ? double.PositiveInfinity : availableWithPadding.Width,
-            ContentOrientation is ScrollContentOrientation.Vertical or ScrollContentOrientation.Both
-                ? double.PositiveInfinity : availableWithPadding.Height);
+            IsHorizontalMeasureInfinite ? double.PositiveInfinity : availableWithPadding.Width,
+            IsVerticalMeasureInfinite ? double.PositiveInfinity : availableWithPadding.Height);
 
         Child.Measure(constraint);
 
@@ -616,6 +822,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         {
             return base.ArrangeOverride(finalSize);
         }
+
         return ArrangeWithAnchoring(finalSize);
     }
 
@@ -626,88 +833,108 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         {
             double width = 0;
             double height = 0;
-            GetComputedScrollMode(finalSize);
+            UpdateComputedScrollMode(finalSize, useArrangedSize: false);
             if (IsZoomEnabled)
             {
                 width = (HorizontalContentAlignment == HorizontalAlignment.Stretch) ?
-                    Math.Max(Child!.DesiredSize.Inflate(Padding).Width, finalSize.Width) : finalSize.Width;
+                    Math.Max(Child!.DesiredSize.Inflate(Padding).Width, finalSize.Width) :
+                    finalSize.Width;
                 height = (VerticalContentAlignment == VerticalAlignment.Stretch) ?
-                    Math.Max(Child!.DesiredSize.Inflate(Padding).Height, finalSize.Height) : finalSize.Height;
+                    Math.Max(Child!.DesiredSize.Inflate(Padding).Height, finalSize.Height) :
+                    finalSize.Height;
             }
             else
             {
                 width = CanHorizontallyScroll ? Math.Max(Child!.DesiredSize.Inflate(Padding).Width, finalSize.Width) : finalSize.Width;
                 height = CanVerticallyScroll ? Math.Max(Child!.DesiredSize.Inflate(Padding).Height, finalSize.Height) : finalSize.Height;
             }
+
             var size = new Size(width, height);
-
-            var isAnchoring = Offset.X >= EdgeDetectionTolerance || Offset.Y >= EdgeDetectionTolerance;
-
-            if (isAnchoring)
-            {
-                // Calculate the new anchor element if necessary.
-                EnsureAnchorElementSelection();
-
-                // Do the arrange.
-                ArrangeOverrideImpl(size, -Offset);
-
-                // If the anchor moved during the arrange, we need to adjust the offset and do another arrange.
-                var anchorShift = TrackAnchor();
-
-                if (anchorShift != default)
-                {
-                    var newOffset = Offset + anchorShift;
-                    var newExtent = Extent;
-                    var maxOffset = new Vector(Extent.Width - Viewport.Width, Extent.Height - Viewport.Height);
-
-                    if (newOffset.X > maxOffset.X)
-                    {
-                        newExtent = newExtent.WithWidth(newOffset.X + Viewport.Width);
-                    }
-
-                    if (newOffset.Y > maxOffset.Y)
-                    {
-                        newExtent = newExtent.WithHeight(newOffset.Y + Viewport.Height);
-                    }
-
-                    Extent = newExtent;
-
-                    try
-                    {
-                        _compositionUpdate = true;
-                        SetCurrentValue(OffsetProperty, newOffset);
-
-                        if (_interactionTracker is not null)
-                        {
-                            _requestId = _interactionTracker.TryUpdatePosition(new Vector3D(Offset.X, Offset.Y, 0));
-                        }
-                    }
-                    finally
-                    {
-                        _compositionUpdate = false;
-                    }
-                }
-
-                ArrangeOverrideImpl(size, -Offset);
-            }
+            var anchoring = GetAnchoringState();
+            if (anchoring.ElementHorizontal || anchoring.ElementVertical)
+                EnsureAnchorElementSelection(anchoring.ElementHorizontal, anchoring.ElementVertical);
             else
-            {
-                ArrangeOverrideImpl(size, -Offset);
-            }
+                ResetAnchorElement();
 
+            ArrangeOverrideImpl(size, GetArrangeOffset());
+            var anchoredOffset = Offset + TrackAnchor(anchoring.ElementHorizontal, anchoring.ElementVertical);
+
+            UpdateComputedScrollMode(finalSize, useArrangedSize: true);
             Viewport = finalSize;
             _isAnchorElementDirty = true;
 
-            ApplyScrollableArea(CalculateScrollableArea(ZoomFactor));
+            var scrollableArea = CalculateScrollableArea(ZoomFactor);
+            if (_interactionTracker is null)
+                Initialize();
+            ApplyScrollableArea(scrollableArea);
+
+            var targetOffset = Offset;
+            if (anchoring.ElementHorizontal)
+                targetOffset = targetOffset.WithX(anchoredOffset.X);
+            else if (anchoring.FarHorizontal)
+                targetOffset = targetOffset.WithX(scrollableArea.MaxPosition.X - scrollableArea.MinPosition.X);
+
+            if (anchoring.ElementVertical)
+                targetOffset = targetOffset.WithY(anchoredOffset.Y);
+            else if (anchoring.FarVertical)
+                targetOffset = targetOffset.WithY(scrollableArea.MaxPosition.Y - scrollableArea.MinPosition.Y);
+
+            if (!Offset.NearlyEquals(targetOffset))
+            {
+                ApplyAnchoredOffset(targetOffset, scrollableArea);
+                ArrangeOverrideImpl(size, GetArrangeOffset());
+            }
+
             SynchronizeCompositionVisualBeforeFirstAnimation();
+            SynchronizeScrollViewOwner(ScrollChangeSource.Layout);
         }
         finally
         {
             _arranging = false;
-
         }
 
         return finalSize;
+    }
+
+    private (bool ElementHorizontal, bool ElementVertical, bool FarHorizontal, bool FarVertical) GetAnchoringState()
+    {
+        var horizontalMaximum = Math.Max(Extent.Width - Viewport.Width, 0);
+        var verticalMaximum = Math.Max(Extent.Height - Viewport.Height, 0);
+        var horizontalRatio = HorizontalAnchorRatio;
+        var verticalRatio = VerticalAnchorRatio;
+        var farHorizontal = horizontalRatio == 1 && Offset.X >= horizontalMaximum - EdgeDetectionTolerance;
+        var farVertical = verticalRatio == 1 && Offset.Y >= verticalMaximum - EdgeDetectionTolerance;
+        var elementHorizontal = !double.IsNaN(horizontalRatio)
+                                && !farHorizontal
+                                && !(horizontalRatio == 0 && Offset.X <= EdgeDetectionTolerance);
+        var elementVertical = !double.IsNaN(verticalRatio)
+                              && !farVertical
+                              && !(verticalRatio == 0 && Offset.Y <= EdgeDetectionTolerance);
+        return (elementHorizontal, elementVertical, farHorizontal, farVertical);
+    }
+
+    private void ApplyAnchoredOffset(
+        Vector offset,
+        (Size Extent, Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea)
+    {
+        try
+        {
+            _compositionUpdate = true;
+            SetCurrentValue(OffsetProperty, offset);
+
+            if (_interactionTracker is not null)
+            {
+                var trackerPosition = ToTrackerPosition(Offset, scrollableArea);
+                _trackerPosition = trackerPosition;
+                _changeSource = ScrollChangeSource.Layout;
+                _requestId = _interactionTracker.TryUpdatePosition(
+                    new Vector3D(trackerPosition.X, trackerPosition.Y, 0));
+            }
+        }
+        finally
+        {
+            _compositionUpdate = false;
+        }
     }
 
     private void RequestArrangeOnScroll()
@@ -768,34 +995,41 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         }
     }
 
-    private void GetComputedScrollMode(Size finalSize)
+    private void UpdateComputedScrollMode(Size finalSize, bool useArrangedSize)
     {
-        if (IsZoomEnabled)
+        if (IsScrollViewerHost)
         {
-            SetCurrentValue(CanHorizontallyScrollProperty, true);
-            SetCurrentValue(CanVerticallyScrollProperty, true);
+            // ScrollViewer owns Can*Scroll through its scrollbar visibility. Keep that
+            // binding intact and preserve the native ScrollContentPresenter contract.
+            UpdateComputedScrollModeProperties();
             return;
         }
-        var scrollableWidth = Math.Max(0, Child.DesiredSize.Width - finalSize.Width);
-        var scrollHeight = Math.Max(0, Child.DesiredSize.Height - finalSize.Height);
-        if (HorizontalScrollMode == ScrollMode.Enabled
-            || (HorizontalScrollMode == ScrollMode.Auto && scrollableWidth > 0))
-        {
-            SetCurrentValue(CanHorizontallyScrollProperty, true);
-        }
-        else
-        {
-            SetCurrentValue(CanHorizontallyScrollProperty, false);
-        }
-        if (VerticalScrollMode == ScrollMode.Enabled
-            || (VerticalScrollMode == ScrollMode.Auto && scrollHeight > 0))
-        {
-            SetCurrentValue(CanVerticallyScrollProperty, true);
-        }
-        else
-        {
-            SetCurrentValue(CanVerticallyScrollProperty, false);
-        }
+
+        var childSize = useArrangedSize ? Child!.Bounds.Size : Child!.DesiredSize;
+        var contentSize = useArrangedSize ? childSize.Inflate(Child.Margin + Padding) : childSize.Inflate(Padding);
+        var scale = IsZoomEnabled ? ZoomFactor : 1;
+        var scaledContentSize = new Size(contentSize.Width * scale, contentSize.Height * scale);
+        var canScrollHorizontally = ScrollView.CanScroll(
+            HorizontalScrollMode,
+            scaledContentSize.Width > finalSize.Width);
+        var canScrollVertically = ScrollView.CanScroll(
+            VerticalScrollMode,
+            scaledContentSize.Height > finalSize.Height);
+        SetCurrentValue(
+            CanHorizontallyScrollProperty,
+            canScrollHorizontally);
+        SetCurrentValue(
+            CanVerticallyScrollProperty,
+            canScrollVertically);
+        UpdateComputedScrollModeProperties();
+    }
+
+    private void UpdateComputedScrollModeProperties()
+    {
+        var horizontalMode = CanHorizontallyScroll ? ScrollMode.Enabled : ScrollMode.Disabled;
+        var verticalMode = CanVerticallyScroll ? ScrollMode.Enabled : ScrollMode.Disabled;
+        SetAndRaise(ComputedHorizontalScrollModeProperty, ref _computedHorizontalScrollMode, horizontalMode);
+        SetAndRaise(ComputedVerticalScrollModeProperty, ref _computedVerticalScrollMode, verticalMode);
     }
 
     partial void OnPropertyChangedOverride(AvaloniaPropertyChangedEventArgs change)
@@ -814,10 +1048,12 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
                 }
             }
 
-            if (!_scaleChanged && !_compositionUpdate)
+            if (!_scaleChanged && !_compositionUpdate && _interactionTracker is not null)
             {
                 var offset = change.GetNewValue<Vector>();
-                _requestId = _interactionTracker!.TryUpdatePosition(new Vector3D(offset.X, offset.Y, 0));
+                var trackerPosition = ToTrackerPosition(offset, CalculateScrollableArea(ZoomFactor));
+                _trackerPosition = trackerPosition;
+                _requestId = _interactionTracker.TryUpdatePosition(new Vector3D(trackerPosition.X, trackerPosition.Y, 0));
             }
             else
             {
@@ -851,14 +1087,30 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             ClearScrollAnimation(GetCompositionVisual());
             EnsureScrollAnimation();
         }
-        else if (change.Property == ScrollFeaturesProperty ||
-                change.Property == CanVerticallyScrollProperty ||
-                change.Property == CanHorizontallyScrollProperty ||
-                change.Property == IsZoomEnabledProperty)
+        else if (change.Property == CanVerticallyScrollProperty ||
+                 change.Property == CanHorizontallyScrollProperty)
+        {
+            UpdateComputedScrollModeProperties();
             UpdateInteractionOptions();
+        }
+        else if (change.Property == IsZoomEnabledProperty ||
+                 change.Property == ScrollViewer.IsScrollInertiaEnabledProperty ||
+                 change.Property == GestureBindingsProperty ||
+                 change.Property == ScrollInputMultiplierProperty ||
+                 change.Property == ZoomInputMultiplierProperty ||
+                 change.Property == ScrollInertiaDecayRateProperty ||
+                 change.Property == ZoomInertiaDecayRateProperty ||
+                 change.Property == OverscrollElasticityProperty ||
+                 change.Property == OverscrollBounceRateProperty)
+            UpdateInteractionOptions();
+        else if (change.Property == HorizontalAnchorRatioProperty ||
+                 change.Property == VerticalAnchorRatioProperty)
+        {
+            _isAnchorElementDirty = true;
+        }
         else if (change.Property == ZoomFactorProperty)
         {
-            if (!_compositionUpdate && _interactionTracker != null)
+            if (!_compositionUpdate && _interactionTracker is not null)
             {
                 var scale = change.GetNewValue<double>();
                 ZoomTo(scale);
@@ -884,7 +1136,10 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     private void BringIntoViewRequested(object? sender, RequestBringIntoViewEventArgs e)
     {
         if (e.TargetObject is not null)
-            e.Handled = BringDescendantIntoView(e.TargetObject, e.TargetRect);
+        {
+            var isAnimated = e is SmoothScrollBringIntoViewRequestEventArgs { IsAnimated: true };
+            e.Handled = BringDescendantIntoView(e.TargetObject, e.TargetRect, isAnimated);
+        }
     }
 
     private void ChildChanged(AvaloniaPropertyChangedEventArgs e)
@@ -908,74 +1163,119 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         EnsureScrollAnimation();
     }
 
-    private void EnsureAnchorElementSelection()
+    private void EnsureAnchorElementSelection(bool horizontal, bool vertical)
     {
-        if (!_isAnchorElementDirty || _anchorCandidates is null)
-        {
+        if (!_isAnchorElementDirty)
             return;
-        }
 
-        _anchorElement = null;
-        _anchorElementBounds = default;
-        _isAnchorElementDirty = false;
+        ResetAnchorElement();
+        if (_anchorCandidates is null)
+            return;
 
-        var bestCandidate = default(Control);
-        var bestCandidateDistance = double.MaxValue;
-
-        // Find the anchor candidate that is scrolled closest to the top-left of this
-        // ScrollContentPresenter.
+        var candidates = new List<(Control Element, Rect Bounds)>();
         foreach (var element in _anchorCandidates)
         {
             if (element.IsVisible && GetViewportBounds(element, out var bounds))
-            {
-                var distance = (Vector)bounds.Position;
-                var candidateDistance = Math.Abs(distance.Length);
+                candidates.Add((element, bounds));
+        }
 
-                if (candidateDistance < bestCandidateDistance)
-                {
-                    bestCandidate = element;
-                    bestCandidateDistance = candidateDistance;
-                }
+        if (candidates.Count == 0)
+            return;
+
+        var requestedElement = _scrollViewOwner?
+            .RaiseAnchorRequested(candidates.Select(candidate => candidate.Element))?
+            .AnchorElement;
+        if (requestedElement is not null &&
+            candidates.Any(candidate => ReferenceEquals(candidate.Element, requestedElement)) &&
+            _anchorCandidates.Contains(requestedElement) &&
+            requestedElement.IsVisible &&
+            GetViewportBounds(requestedElement, out _) &&
+            TranslateBounds(requestedElement, Child!, out var requestedBounds))
+        {
+            _anchorElement = requestedElement;
+            _anchorElementBounds = requestedBounds;
+            return;
+        }
+
+        var bestCandidate = default(Control);
+        var bestCandidateDistance = double.MaxValue;
+        var viewportAnchorX = Bounds.Width * HorizontalAnchorRatio;
+        var viewportAnchorY = Bounds.Height * VerticalAnchorRatio;
+
+        foreach (var (element, _) in candidates)
+        {
+            if (!_anchorCandidates.Contains(element) ||
+                !element.IsVisible ||
+                !GetViewportBounds(element, out var bounds))
+                continue;
+
+            var candidateDistance = 0.0;
+            if (horizontal)
+            {
+                var elementAnchorX = bounds.X + HorizontalAnchorRatio * bounds.Width;
+                var distance = viewportAnchorX - elementAnchorX;
+                candidateDistance += distance * distance;
+            }
+
+            if (vertical)
+            {
+                var elementAnchorY = bounds.Y + VerticalAnchorRatio * bounds.Height;
+                var distance = viewportAnchorY - elementAnchorY;
+                candidateDistance += distance * distance;
+            }
+
+            if (candidateDistance < bestCandidateDistance)
+            {
+                bestCandidate = element;
+                bestCandidateDistance = candidateDistance;
             }
         }
 
         if (bestCandidate != null)
         {
-            // We have a candidate, calculate its bounds relative to Child. Because these
-            // bounds aren't relative to the ScrollContentPresenter itself, if they change
-            // then we know it wasn't just due to scrolling.
-            var unscrolledBounds = TranslateBounds(bestCandidate, Child!);
             _anchorElement = bestCandidate;
-            _anchorElementBounds = unscrolledBounds;
+            _anchorElementBounds = TranslateBounds(bestCandidate, Child!);
         }
     }
 
-    private Vector TrackAnchor()
+    private Vector TrackAnchor(bool horizontal, bool vertical)
     {
-        // If we have an anchor and its position relative to Child has changed during the
-        // arrange then that change wasn't just due to scrolling (as scrolling doesn't adjust
-        // relative positions within Child).
         if (_anchorElement is not null &&
             TranslateBounds(_anchorElement, Child!, out var updatedBounds) &&
-            updatedBounds.Position != _anchorElementBounds.Position)
+            updatedBounds != _anchorElementBounds)
         {
-            var offset = updatedBounds.Position - _anchorElementBounds.Position;
-            return offset;
+            var oldAnchorPoint = GetElementAnchorPoint(_anchorElementBounds, horizontal, vertical);
+            var newAnchorPoint = GetElementAnchorPoint(updatedBounds, horizontal, vertical);
+            var shift = newAnchorPoint - oldAnchorPoint;
+            return new Vector(
+                horizontal ? shift.X * ZoomFactor : 0,
+                vertical ? shift.Y * ZoomFactor : 0);
         }
 
         return default;
+    }
+
+    private Point GetElementAnchorPoint(Rect bounds, bool horizontal, bool vertical) => new(
+        horizontal ? bounds.X + HorizontalAnchorRatio * bounds.Width : 0,
+        vertical ? bounds.Y + VerticalAnchorRatio * bounds.Height : 0);
+
+    private void ResetAnchorElement()
+    {
+        _anchorElement = null;
+        _anchorElementBounds = default;
+        _isAnchorElementDirty = false;
     }
 
     private bool GetViewportBounds(Control element, out Rect bounds)
     {
         if (TranslateBounds(element, Child!, out var childBounds))
         {
-            // We want the bounds relative to the new Offset, regardless of whether the child
-            // control has actually been arranged to this offset yet, so translate first to the
-            // child control and then apply Offset rather than translating directly to this
-            // control.
             var thisBounds = new Rect(Bounds.Size);
-            bounds = new Rect(childBounds.Position - Offset, childBounds.Size);
+            bounds = new Rect(
+                childBounds.X * ZoomFactor - Offset.X,
+                childBounds.Y * ZoomFactor - Offset.Y,
+                childBounds.Width * ZoomFactor,
+                childBounds.Height * ZoomFactor);
             return bounds.Intersects(thisBounds);
         }
 
@@ -1023,7 +1323,6 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             {
                 _verticalSnapPoints = new List<double>();
                 _verticalSnapPoint = scrollable.GetRegularSnapPoints(Orientation.Vertical, VerticalSnapPointsAlignment, out _verticalSnapPointOffset);
-
             }
 
             if (!_areHorizontalSnapPointsRegular)
@@ -1047,81 +1346,79 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     private void UpdateScrollModified()
     {
-        if (_inertiaArgs == null)
+        if (_inertiaArgs is not { } args
+            || _interactionTracker is null
+            || HorizontalSnapPointsType is SnapPointsType.None
+            && VerticalSnapPointsType is SnapPointsType.None)
+        {
             return;
-
-        var pos = new Vector(_inertiaArgs.NaturalRestingPosition.X, _inertiaArgs.NaturalRestingPosition.Y);
-
-        Vector snapPoint;
-        if (_inertiaArgs.IsInertiaFromImpulse)
-        {
-            var vel = new Vector(-_inertiaArgs.PositionVelocityInPixelsPerSecond.X, -_inertiaArgs.PositionVelocityInPixelsPerSecond.Y);
-            snapPoint = SnapOffset(pos, vel, true);
-        }
-        else
-        {
-            snapPoint = SnapOffset(pos);
         }
 
-        if (snapPoint == pos)
-            return;
+        var scale = Math.Clamp(
+            args.ModifiedRestingScale ?? args.NaturalRestingScale,
+            MinZoomFactor,
+            MaxZoomFactor);
+        var scrollableArea = CalculateScrollableArea(scale);
+        var naturalTrackerPosition = new Vector(
+            args.NaturalRestingPosition.X,
+            args.NaturalRestingPosition.Y);
+        var naturalOffset = FromTrackerPosition(naturalTrackerPosition, scrollableArea);
+        var direction = new Vector(
+            args.PositionVelocityInPixelsPerSecond.X,
+            args.PositionVelocityInPixelsPerSecond.Y);
+        var snapOffset = SnapOffset(naturalOffset, direction, args.IsInertiaFromImpulse, scale);
+        var snapTrackerPosition = ToTrackerPosition(snapOffset, scrollableArea);
 
-        _interactionTracker!.TryUpdatePosition(new Vector3D(snapPoint.X, snapPoint.Y, 0));
+        // Retarget the active inertia instead of issuing a position update, which would stop
+        // the inertia state and turn every snap into an immediate jump.
+        _ = _interactionTracker.TryUpdatePositionInertiaRestingValue(
+            new Vector3D(snapTrackerPosition.X, snapTrackerPosition.Y, 0));
     }
 
-    private Vector SnapOffset(Vector offset, Vector direction = default, bool snapToNext = false)
+    private Vector SnapOffset(
+        Vector offset,
+        Vector direction = default,
+        bool snapToNext = false,
+        double scale = 1)
     {
         var scrollable = GetScrollSnapPointsInfo(Content);
 
         if (scrollable is null || (VerticalSnapPointsType == SnapPointsType.None && HorizontalSnapPointsType == SnapPointsType.None))
             return offset;
 
+        scale = double.IsFinite(scale) && scale > 0 ? scale : 1;
         var diff = GetAlignmentDiff();
 
-        if (VerticalSnapPointsType != SnapPointsType.None && (_areVerticalSnapPointsRegular || _verticalSnapPoints?.Count > 0) && (!snapToNext || snapToNext && direction.Y != 0))
+        if (VerticalSnapPointsType is not SnapPointsType.None
+            && (!snapToNext || direction.Y is not 0)
+            && TryFindSnapPoint(
+                _areVerticalSnapPointsRegular,
+                _verticalSnapPoint,
+                _verticalSnapPointOffset,
+                _verticalSnapPoints,
+                offset.Y + diff.Y,
+                direction.Y,
+                snapToNext,
+                scale,
+                out var verticalSnapPoint))
         {
-            var estimatedOffset = new Vector(offset.X, offset.Y + diff.Y);
-            double previousSnapPoint = 0, nextSnapPoint = 0, midPoint = 0;
-
-            if (_areVerticalSnapPointsRegular)
-            {
-                previousSnapPoint = (int)(estimatedOffset.Y / _verticalSnapPoint) * _verticalSnapPoint + _verticalSnapPointOffset;
-                nextSnapPoint = previousSnapPoint + _verticalSnapPoint;
-                midPoint = (previousSnapPoint + nextSnapPoint) / 2;
-            }
-            else if (_verticalSnapPoints?.Count > 0)
-            {
-                (previousSnapPoint, nextSnapPoint) = FindNearestSnapPoint(_verticalSnapPoints, estimatedOffset.Y);
-                midPoint = (previousSnapPoint + nextSnapPoint) / 2;
-            }
-
-            var nearestSnapPoint = snapToNext ? (direction.Y > 0 ? previousSnapPoint : nextSnapPoint) :
-                estimatedOffset.Y < midPoint ? previousSnapPoint : nextSnapPoint;
-
-            offset = new Vector(offset.X, nearestSnapPoint - diff.Y);
+            offset = offset.WithY(verticalSnapPoint - diff.Y);
         }
 
-        if (HorizontalSnapPointsType != SnapPointsType.None && (_areHorizontalSnapPointsRegular || _horizontalSnapPoints?.Count > 0) && (!snapToNext || snapToNext && direction.X != 0))
+        if (HorizontalSnapPointsType is not SnapPointsType.None
+            && (!snapToNext || direction.X is not 0)
+            && TryFindSnapPoint(
+                _areHorizontalSnapPointsRegular,
+                _horizontalSnapPoint,
+                _horizontalSnapPointOffset,
+                _horizontalSnapPoints,
+                offset.X + diff.X,
+                direction.X,
+                snapToNext,
+                scale,
+                out var horizontalSnapPoint))
         {
-            var estimatedOffset = new Vector(offset.X + diff.X, offset.Y);
-            double previousSnapPoint = 0, nextSnapPoint = 0, midPoint = 0;
-
-            if (_areHorizontalSnapPointsRegular)
-            {
-                previousSnapPoint = (int)(estimatedOffset.X / _horizontalSnapPoint) * _horizontalSnapPoint + _horizontalSnapPointOffset;
-                nextSnapPoint = previousSnapPoint + _horizontalSnapPoint;
-                midPoint = (previousSnapPoint + nextSnapPoint) / 2;
-            }
-            else if (_horizontalSnapPoints?.Count > 0)
-            {
-                (previousSnapPoint, nextSnapPoint) = FindNearestSnapPoint(_horizontalSnapPoints, estimatedOffset.X);
-                midPoint = (previousSnapPoint + nextSnapPoint) / 2;
-            }
-
-            var nearestSnapPoint = snapToNext ? (direction.X > 0 ? previousSnapPoint : nextSnapPoint) :
-                estimatedOffset.X < midPoint ? previousSnapPoint : nextSnapPoint;
-
-            offset = new Vector(nearestSnapPoint - diff.X, offset.Y);
+            offset = offset.WithX(horizontalSnapPoint - diff.X);
         }
 
         Vector GetAlignmentDiff()
@@ -1154,25 +1451,69 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         return offset;
     }
 
-    private static (double previous, double next) FindNearestSnapPoint(IReadOnlyList<double> snapPoints, double value)
+    private static bool TryFindSnapPoint(
+        bool regular,
+        double interval,
+        double regularOffset,
+        IReadOnlyList<double>? irregularPoints,
+        double value,
+        double direction,
+        bool snapToNext,
+        double scale,
+        out double snapPoint)
     {
-        var point = snapPoints.BinarySearch(value, Comparer<double>.Default);
-
-        double previousSnapPoint, nextSnapPoint;
-
-        if (point < 0)
+        if (regular && double.IsFinite(interval) && interval > 0)
         {
-            point = ~point;
+            var scaledInterval = interval * scale;
+            var scaledOffset = regularOffset * scale;
+            var normalized = (value - scaledOffset) / scaledInterval;
+            var regularIndex = (snapToNext, direction > 0) switch
+            {
+                (true, true) => Math.Floor(normalized) + 1,
+                (true, false) => Math.Ceiling(normalized) - 1,
+                _ => Math.Floor(normalized + 0.5)
+            };
+            snapPoint = (regularIndex * scaledInterval) + scaledOffset;
+            return true;
+        }
 
-            previousSnapPoint = snapPoints[Math.Max(0, point - 1)];
-            nextSnapPoint = point >= snapPoints.Count ? snapPoints.Last() : snapPoints[Math.Max(0, point)];
+        if (irregularPoints is not { Count: > 0 })
+        {
+            snapPoint = default;
+            return false;
+        }
+
+        var unscaledValue = value / scale;
+        var point = irregularPoints.BinarySearch(unscaledValue, Comparer<double>.Default);
+        int index;
+        if (snapToNext)
+        {
+            index = (direction > 0, point >= 0) switch
+            {
+                (true, true) => point + 1,
+                (true, false) => ~point,
+                (false, true) => point - 1,
+                (false, false) => ~point - 1
+            };
+        }
+        else if (point >= 0)
+        {
+            index = point;
         }
         else
         {
-            previousSnapPoint = nextSnapPoint = snapPoints[Math.Max(0, point)];
+            var next = ~point;
+            var previous = Math.Max(0, next - 1);
+            next = Math.Min(next, irregularPoints.Count - 1);
+            index = unscaledValue - irregularPoints[previous]
+                    < irregularPoints[next] - unscaledValue ?
+                previous :
+                next;
         }
 
-        return (previousSnapPoint, nextSnapPoint);
+        index = Math.Clamp(index, 0, irregularPoints.Count - 1);
+        snapPoint = irregularPoints[index] * scale;
+        return true;
     }
 
     private IScrollSnapPointsInfo? GetScrollSnapPointsInfo(object? content)
@@ -1213,10 +1554,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     public void ValuesChanged(InteractionTracker sender, InteractionTrackerValuesChangedArgs args)
     {
-
         var position = new Vector(args.Position.X, args.Position.Y);
         var scale = args.Scale;
-        var compositionVisual = GetCompositionVisual();
 
         void ApplyValues()
         {
@@ -1225,7 +1564,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
                 return;
             }
 
-            if (args.RequestId != 0 &&
+            if (args.RequestId > 0 &&
                 _requestId is { } id &&
                 args.RequestId < id)
             {
@@ -1237,16 +1576,30 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
                 _compositionUpdate = true;
                 _scaleChanged = !MathUtilities.AreClose(scale, ZoomFactor);
 
-                ApplyScrollableArea(CalculateScrollableArea(scale));
+                var scrollableArea = CalculateScrollableArea(scale);
+                if (_scaleChanged)
+                    UpdateComputedScrollMode(scrollableArea);
+                _trackerPosition = position;
+                ApplyScrollableArea(scrollableArea);
 
-                SetCurrentValue(OffsetProperty, position);
+                SetCurrentValue(OffsetProperty, FromTrackerPosition(position, scrollableArea));
                 SetCurrentValue(ZoomFactorProperty, scale);
+                if (_scaleChanged)
+                {
+                    // Composition updates the visible scale immediately, but virtualizing children
+                    // refresh their effective viewport only during layout. Keep layout close to the
+                    // composition clock without arranging on every frame.
+                    RequestArrangeOnScroll();
+                }
             }
             finally
             {
                 _compositionUpdate = false;
                 _scaleChanged = false;
             }
+
+            SynchronizeScrollViewOwner(
+                args.IsUserInitiated ? ScrollChangeSource.User : _changeSource);
         }
 
         if (Dispatcher.UIThread.CheckAccess())
@@ -1260,9 +1613,10 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     }
 
 
-
     void IInteractionTrackerOwner.CustomAnimationStateEntered(InteractionTracker sender, InteractionTrackerCustomAnimationStateEnteredArgs args)
     {
+        // The initiating ScrollTo/ZoomTo request records its source before the animation starts.
+        // Do not overwrite it here, as internal user or layout requests must retain their origin.
     }
 
     void IInteractionTrackerOwner.IdleStateEntered(InteractionTracker sender, InteractionTrackerIdleStateEnteredArgs args)
@@ -1273,6 +1627,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     void IInteractionTrackerOwner.InertiaStateEntered(InteractionTracker sender, InteractionTrackerInertiaStateEnteredArgs args)
     {
+        _changeSource = args.RequestId is 0 ? ScrollChangeSource.User : ScrollChangeSource.Programmatic;
         _inertiaArgs = args;
         EnsureScrollAnimation();
         UpdateScrollModified();
@@ -1280,39 +1635,68 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     void IInteractionTrackerOwner.InteractingStateEntered(InteractionTracker sender, InteractionTrackerInteractingStateEnteredArgs args)
     {
+        _changeSource = ScrollChangeSource.User;
         _inertiaArgs = null;
         EnsureScrollAnimation();
     }
 
 
-    private void ApplyScrollableArea((Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea)
+    private void ApplyScrollableArea((Size Extent, Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea)
     {
+        Extent = scrollableArea.ScaledExtent;
+
         if (_interactionTracker is null || _interactionSource is null)
         {
             return;
         }
 
-        Extent = scrollableArea.ScaledExtent;
+        var minPosition = new Vector3D(scrollableArea.MinPosition.X, scrollableArea.MinPosition.Y, 0);
+        var maxPosition = new Vector3D(scrollableArea.MaxPosition.X, scrollableArea.MaxPosition.Y, 0);
+        var boundsChanged = _interactionTracker.MinPosition != minPosition
+                            || _interactionTracker.MaxPosition != maxPosition;
 
-        _interactionTracker.MinPosition = new Vector3D(scrollableArea.MinPosition.X, scrollableArea.MinPosition.Y, 0);
-        _interactionTracker.MaxPosition = new Vector3D(scrollableArea.MaxPosition.X, scrollableArea.MaxPosition.Y, 0);
+        _interactionTracker.MinPosition = minPosition;
+        _interactionTracker.MaxPosition = maxPosition;
 
-        var range = scrollableArea.MaxPosition - scrollableArea.MinPosition;
+        if (boundsChanged)
+        {
+            var currentPosition = new Vector(_interactionTracker.Position.X, _interactionTracker.Position.Y);
+            var constrainedPosition = ScrollGeometry.ClampTrackerPosition(
+                currentPosition,
+                scrollableArea.MinPosition,
+                scrollableArea.MaxPosition);
+            _trackerPosition = constrainedPosition;
+            _interactionTracker.Position = new Vector3D(constrainedPosition.X, constrainedPosition.Y, 0);
+        }
 
-        _interactionSource.PositionXSourceMode = MathUtilities.IsZero(range.X) && !CanHorizontallyScroll
-            ? InteractionSourceMode.Disabled
-            : InteractionSourceMode.EnabledWithInertia;
+        var sourceMode = ScrollViewer.GetIsScrollInertiaEnabled(this) ? InteractionSourceMode.EnabledWithInertia : InteractionSourceMode.EnabledWithoutInertia;
 
-        _interactionSource.PositionYSourceMode = MathUtilities.IsZero(range.Y) && !CanVerticallyScroll
-            ? InteractionSourceMode.Disabled
-            : InteractionSourceMode.EnabledWithInertia;
+        _interactionSource.PositionXSourceMode = CanHorizontallyScroll ? sourceMode : InteractionSourceMode.Disabled;
+
+        _interactionSource.PositionYSourceMode = CanVerticallyScroll ? sourceMode : InteractionSourceMode.Disabled;
     }
 
-    private (Size ScaledExtent, Vector MinPosition, Vector MaxPosition) CalculateScrollableArea(double scale)
+    private void UpdateComputedScrollMode((Size Extent, Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea)
+    {
+        if (IsScrollViewerHost)
+        {
+            UpdateComputedScrollModeProperties();
+            return;
+        }
+
+        SetCurrentValue(
+            CanHorizontallyScrollProperty,
+            ScrollView.CanScroll(HorizontalScrollMode, scrollableArea.MaxPosition.X > scrollableArea.MinPosition.X));
+        SetCurrentValue(
+            CanVerticallyScrollProperty,
+            ScrollView.CanScroll(VerticalScrollMode, scrollableArea.MaxPosition.Y > scrollableArea.MinPosition.Y));
+    }
+
+    private (Size Extent, Size ScaledExtent, Vector MinPosition, Vector MaxPosition) CalculateScrollableArea(double scale)
     {
         if (Child == null)
         {
-            return (default, default, default);
+            return (default, default, default, default);
         }
 
         var childMargin = Child.Margin + Padding;
@@ -1325,71 +1709,55 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         var baseExtent = Child.Bounds.Size.Inflate(childMargin);
         var scaledExtent = new Size(baseExtent.Width * scale, baseExtent.Height * scale);
 
-        var minPosition = ComputeMinPositionForAlignment(baseExtent, scale);
-        var maxPosition = ComputeMaxPositionForAlignment(baseExtent, scale);
+        var horizontalAlignment = IsScrollViewerHost
+            ? 0
+            : Child.HorizontalAlignment switch
+            {
+                HorizontalAlignment.Center or HorizontalAlignment.Stretch => 0.5,
+                HorizontalAlignment.Right => 1,
+                _ => 0
+            };
+        var verticalAlignment = IsScrollViewerHost
+            ? 0
+            : Child.VerticalAlignment switch
+            {
+                VerticalAlignment.Center or VerticalAlignment.Stretch => 0.5,
+                VerticalAlignment.Bottom => 1,
+                _ => 0
+            };
+        var horizontalRange = ScrollGeometry.CalculateAxisRange(
+            scaledExtent.Width,
+            Viewport.Width,
+            horizontalAlignment);
+        var verticalRange = ScrollGeometry.CalculateAxisRange(
+            scaledExtent.Height,
+            Viewport.Height,
+            verticalAlignment);
+        var minPosition = new Vector(horizontalRange.Minimum, verticalRange.Minimum);
+        var maxPosition = new Vector(horizontalRange.Maximum, verticalRange.Maximum);
 
-        return (scaledExtent, minPosition, maxPosition);
+        return (baseExtent, scaledExtent, minPosition, maxPosition);
     }
-    private Vector ComputeMinPositionForAlignment(Size unscaledExtent, double scale)
+
+    private static Vector ToTrackerPosition(
+        Vector offset,
+        (Size Extent, Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea) =>
+        ScrollGeometry.ToTrackerPosition(offset, scrollableArea.MinPosition, scrollableArea.MaxPosition);
+
+    private Vector GetArrangeOffset() => IsScrollViewerHost ? -Offset : -_trackerPosition;
+
+    private static Vector FromTrackerPosition(
+        Vector position,
+        (Size Extent, Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea) =>
+        ScrollGeometry.FromTrackerPosition(position, scrollableArea.MinPosition, scrollableArea.MaxPosition);
+
+    private void SynchronizeScrollViewOwner(ScrollChangeSource source)
     {
-        var scaledWidthMinusViewport = (unscaledExtent.Width * scale) - Viewport.Width;
-        var scaledHeightMinusViewport = (unscaledExtent.Height * scale) - Viewport.Height;
+        if (_scrollViewOwner is null)
+            return;
 
-        var minX = 0.0;
-        var minY = 0.0;
-
-        if (Child is { HorizontalAlignment: HorizontalAlignment.Center or HorizontalAlignment.Stretch })
-            minX = Math.Min(0.0, scaledWidthMinusViewport / 2.0);
-        else if (Child is { HorizontalAlignment: HorizontalAlignment.Right })
-            minX = Math.Min(0.0, scaledWidthMinusViewport);
-
-        if (Child is { VerticalAlignment: VerticalAlignment.Center or VerticalAlignment.Stretch })
-            minY = Math.Min(0.0, scaledHeightMinusViewport / 2.0);
-        else if (Child is { VerticalAlignment: VerticalAlignment.Bottom })
-            minY = Math.Min(0.0, scaledHeightMinusViewport);
-
-        return new Vector(minX, minY);
-    }
-
-    private Vector ComputeMaxPositionForAlignment(Size unscaledExtent, double scale)
-    {
-        var scaledWidthMinusViewport = (unscaledExtent.Width * scale) - Viewport.Width;
-        var scaledHeightMinusViewport = (unscaledExtent.Height * scale) - Viewport.Height;
-
-        var maxX = scaledWidthMinusViewport;
-        var maxY = scaledHeightMinusViewport;
-
-        if (Child is { HorizontalAlignment: HorizontalAlignment.Center or HorizontalAlignment.Stretch })
-        {
-            if (maxX < 0.0)
-                maxX /= 2.0;
-            else
-                maxX = scaledWidthMinusViewport;
-        }
-        else if (Child is { HorizontalAlignment: HorizontalAlignment.Right })
-        {
-            if (scaledWidthMinusViewport < 0.0)
-                maxX = -scaledWidthMinusViewport;
-            else
-                maxX = scaledWidthMinusViewport;
-        }
-
-        if (Child is { VerticalAlignment: VerticalAlignment.Center or VerticalAlignment.Stretch })
-        {
-            if (maxY < 0.0)
-                maxY /= 2.0;
-            else
-                maxY = scaledHeightMinusViewport;
-        }
-        else if (Child is { VerticalAlignment: VerticalAlignment.Bottom })
-        {
-            if (scaledHeightMinusViewport < 0.0)
-                maxY = -scaledHeightMinusViewport;
-            else
-                maxY = scaledHeightMinusViewport;
-        }
-
-        return new Vector(maxX, maxY);
+        var logicalExtent = CalculateScrollableArea(ZoomFactor).Extent;
+        _scrollViewOwner.UpdateFromPresenter(Extent, logicalExtent, Viewport, Offset, ZoomFactor, source);
     }
 
     /// <summary>
@@ -1400,10 +1768,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         if (Child is null || _interactionTracker is null || !Child.IsAttachedToVisualTree())
             return;
         var compositionVisual = ElementComposition.GetElementVisual(Child)!;
-        if (_animationGroup is null)
-        {
-            _animationGroup = CreateScrollAnimationGroup(compositionVisual);
-        }
+        SynchronizeCompositionVisual(compositionVisual);
+        _animationGroup ??= CreateScrollAnimationGroup(compositionVisual);
 
         compositionVisual.StartAnimationGroup(_animationGroup);
 
@@ -1455,18 +1821,23 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     private void SynchronizeCompositionVisualBeforeFirstAnimation()
     {
-        if (_animationGroup is not null || Child is null || IsLoaded)
-        {
+        if (Child is null)
             return;
-        }
 
         var compositionVisual = ElementComposition.GetElementVisual(Child);
-        if (compositionVisual is null)
-        {
+        if (compositionVisual is null || _animationGroup is not null)
             return;
-        }
 
-        var position = _interactionTracker?.Position ?? new Vector3D(Offset.X, Offset.Y, 0);
+        SynchronizeCompositionVisual(compositionVisual);
+    }
+
+    private void SynchronizeCompositionVisual(CompositionVisual compositionVisual)
+    {
+        if (Child is null)
+            return;
+
+        var fallbackPosition = ToTrackerPosition(Offset, CalculateScrollableArea(ZoomFactor));
+        var position = _interactionTracker?.Position ?? new Vector3D(fallbackPosition.X, fallbackPosition.Y, 0);
         var scale = _interactionTracker?.Scale ?? ZoomFactor;
 
         var visualScale = new Vector3D(scale, scale, scale);
@@ -1478,10 +1849,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             offset.Z - position.Z);
 
         compositionVisual.Scale = visualScale;
-        if (scale < 1)
-        {
-            compositionVisual.Translation = translation;
-        }
+        compositionVisual.Translation = translation;
     }
 
     private void UpdateInteractionOptions()
@@ -1489,39 +1857,181 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         if (_interactionTracker == null || _interactionSource == null)
             return;
 
-        _interactionSource.ScaleSourceMode = IsZoomEnabled
-            ? InteractionSourceMode.EnabledWithInertia
-            : InteractionSourceMode.Disabled;
-        _interactionSource.PositionXSourceMode = CanHorizontallyScroll
-            ? InteractionSourceMode.EnabledWithInertia
-            : InteractionSourceMode.Disabled;
-        _interactionSource.PositionYSourceMode = CanVerticallyScroll
-            ? InteractionSourceMode.EnabledWithInertia
-            : InteractionSourceMode.Disabled;
+        var sourceMode = ScrollViewer.GetIsScrollInertiaEnabled(this) ? InteractionSourceMode.EnabledWithInertia : InteractionSourceMode.EnabledWithoutInertia;
 
-        var chainingMode = IsScrollChainingEnabled
-            ? InteractionChainingMode.Auto
-            : InteractionChainingMode.Never;
+        _interactionSource.ScaleSourceMode = IsZoomEnabled ? sourceMode : InteractionSourceMode.Disabled;
+        _interactionSource.PositionXSourceMode = CanHorizontallyScroll ? sourceMode : InteractionSourceMode.Disabled;
+        _interactionSource.PositionYSourceMode = CanVerticallyScroll ? sourceMode : InteractionSourceMode.Disabled;
+        _interactionSource.GestureBindings = GestureBindings;
+        _interactionSource.ScrollInputMultiplier = ScrollInputMultiplier;
+        _interactionSource.ZoomInputMultiplier = ZoomInputMultiplier;
+
+        _interactionTracker.PositionInertiaDecayRate = new Vector3D(
+            ScrollInertiaDecayRate,
+            ScrollInertiaDecayRate,
+            ScrollInertiaDecayRate);
+        _interactionTracker.ScaleInertiaDecayRate = ZoomInertiaDecayRate;
+        _interactionTracker.ConfigurePhysics(OverscrollElasticity, OverscrollBounceRate);
+
+        var chainingMode = IsScrollChainingEnabled ? InteractionChainingMode.Auto : InteractionChainingMode.Never;
         _interactionSource.PositionXChainingMode = chainingMode;
         _interactionSource.PositionYChainingMode = chainingMode;
     }
 
-    public void ZoomBy(double zoomFactorDelta, bool isAnimated = true)
+    /// <summary>
+    /// Scrolls to a logical content offset.
+    /// </summary>
+    /// <param name="offset">The requested logical offset.</param>
+    /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <remarks>
+    /// Public calls are reported to an attached <see cref="ScrollView"/> as
+    /// <see cref="ScrollChangeSource.Programmatic"/> changes.
+    /// </remarks>
+    public void ScrollTo(Vector offset, bool isAnimated = false) =>
+        ScrollTo(offset, isAnimated, ScrollChangeSource.Programmatic);
+
+    internal void ScrollTo(
+        Vector offset,
+        bool isAnimated,
+        ScrollChangeSource source)
     {
-        if (_interactionTracker is null)
+        _changeSource = source;
+        offset = ClampOffsetToEnabledAxes(offset);
+
+        if (_interactionTracker is null || GetCompositionVisual() is not { } visual)
+        {
+            SetCurrentValue(OffsetProperty, offset);
+            SynchronizeScrollViewOwner(source);
             return;
-        ZoomTo(_interactionTracker.Scale + zoomFactorDelta, isAnimated);
+        }
+
+        var trackerPosition = ToTrackerPosition(offset, CalculateScrollableArea(ZoomFactor));
+        _trackerPosition = trackerPosition;
+        var position = new Vector3D(trackerPosition.X, trackerPosition.Y, 0);
+
+        if (isAnimated)
+        {
+            var animation = visual.Compositor.CreateVector3DKeyFrameAnimation();
+            animation.Duration = TimeSpan.FromMilliseconds(300);
+            animation.InsertKeyFrame(1, position, new CircularEaseOut());
+            _requestId = _interactionTracker.TryUpdatePositionWithAnimation(animation);
+        }
+        else
+        {
+            _requestId = _interactionTracker.TryUpdatePosition(position);
+        }
     }
 
-    public void ZoomTo(double zoomFactor, bool isAnimated = true)
+    private Vector ClampOffsetToEnabledAxes(Vector offset)
     {
-        if (_interactionTracker is null)
-            return;
+        var scrollableArea = CalculateScrollableArea(ZoomFactor);
+        var canScrollHorizontally = IsScrollViewerHost
+            ? CanHorizontallyScroll
+            : ScrollView.CanScroll(
+                HorizontalScrollMode,
+                scrollableArea.MaxPosition.X > scrollableArea.MinPosition.X);
+        var canScrollVertically = IsScrollViewerHost
+            ? CanVerticallyScroll
+            : ScrollView.CanScroll(
+                VerticalScrollMode,
+                scrollableArea.MaxPosition.Y > scrollableArea.MinPosition.Y);
+        return new(
+            canScrollHorizontally ? offset.X : 0,
+            canScrollVertically ? offset.Y : 0);
+    }
+
+    /// <summary>
+    /// Changes the zoom factor by an additive amount.
+    /// </summary>
+    /// <param name="zoomFactorDelta">The amount added to the current zoom factor.</param>
+    /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    public void ZoomBy(double zoomFactorDelta, bool isAnimated = true) =>
+        ZoomBy(zoomFactorDelta, centerPoint: null, isAnimated: isAnimated);
+
+    /// <summary>
+    /// Changes the zoom factor by an additive amount around a viewport-relative point.
+    /// </summary>
+    /// <param name="zoomFactorDelta">The amount added to the current zoom factor.</param>
+    /// <param name="centerPoint">
+    /// The viewport-relative point that remains visually stationary, or <see langword="null"/> to use the viewport center.
+    /// </param>
+    /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="centerPoint"/> contains a non-finite coordinate.
+    /// </exception>
+    public void ZoomBy(double zoomFactorDelta, Point? centerPoint, bool isAnimated = true)
+    {
+        ValidateZoomCenter(centerPoint);
+        var currentScale = _interactionTracker?.Scale ?? ZoomFactor;
+        ZoomTo(
+            currentScale + zoomFactorDelta,
+            centerPoint,
+            isAnimated);
+    }
+
+    /// <summary>
+    /// Changes the zoom factor to an absolute value.
+    /// </summary>
+    /// <param name="zoomFactor">The requested zoom factor.</param>
+    /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <remarks>
+    /// Public calls are reported to an attached <see cref="ScrollView"/> as
+    /// <see cref="ScrollChangeSource.Programmatic"/> changes.
+    /// </remarks>
+    public void ZoomTo(double zoomFactor, bool isAnimated = true) =>
+        ZoomTo(
+            zoomFactor,
+            centerPoint: null,
+            isAnimated: isAnimated,
+            source: ScrollChangeSource.Programmatic);
+
+    /// <summary>
+    /// Changes the zoom factor to an absolute value around a viewport-relative point.
+    /// </summary>
+    /// <param name="zoomFactor">The requested zoom factor.</param>
+    /// <param name="centerPoint">
+    /// The viewport-relative point that remains visually stationary, or <see langword="null"/> to use the viewport center.
+    /// </param>
+    /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="centerPoint"/> contains a non-finite coordinate.
+    /// </exception>
+    public void ZoomTo(double zoomFactor, Point? centerPoint, bool isAnimated = true) =>
+        ZoomTo(
+            zoomFactor,
+            centerPoint,
+            isAnimated,
+            source: ScrollChangeSource.Programmatic);
+
+    internal void ZoomTo(
+        double zoomFactor,
+        Point? centerPoint,
+        bool isAnimated,
+        ScrollChangeSource source)
+    {
+        ValidateZoomCenter(centerPoint);
+        var minimumScale = _interactionTracker?.MinScale ?? MinZoomFactor;
+        var maximumScale = _interactionTracker?.MaxScale ?? MaxZoomFactor;
+        var newScale = Math.Clamp(zoomFactor, minimumScale, maximumScale);
         var visual = GetCompositionVisual();
-        if (visual is null)
+        if (_interactionTracker is null || visual is null)
+        {
+            try
+            {
+                _compositionUpdate = true;
+                SetCurrentValue(ZoomFactorProperty, newScale);
+            }
+            finally
+            {
+                _compositionUpdate = false;
+            }
+
+            SynchronizeScrollViewOwner(source);
             return;
-        var newScale = Math.Clamp(zoomFactor, _interactionTracker.MinScale, _interactionTracker.MaxScale);
-        var viewportCenter = new Vector3D(Viewport.Width * 0.5, Viewport.Height * 0.5, 0);
+        }
+
+        var zoomCenter = ResolveZoomCenter(centerPoint);
+        _changeSource = source;
 
         if (isAnimated)
         {
@@ -1529,13 +2039,24 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             var animation = compositor.CreateDoubleKeyFrameAnimation();
             animation.Duration = TimeSpan.FromMilliseconds(300);
             animation.InsertKeyFrame(1.0f, newScale, new CircularEaseOut());
-            _interactionTracker.TryUpdateScaleWithAnimation(animation, viewportCenter);
+            _requestId = _interactionTracker.TryUpdateScaleWithAnimation(animation, zoomCenter);
         }
         else
         {
-            _interactionTracker.TryUpdateScale(newScale, viewportCenter);
+            _requestId = _interactionTracker.TryUpdateScale(newScale, zoomCenter);
         }
+    }
 
+    private Vector3D ResolveZoomCenter(Point? centerPoint)
+    {
+        var point = centerPoint ?? new Point(Viewport.Width * 0.5, Viewport.Height * 0.5);
+        return new Vector3D(point.X, point.Y, 0);
+    }
+
+    internal static void ValidateZoomCenter(Point? centerPoint)
+    {
+        if (centerPoint is { } point && (!double.IsFinite(point.X) || !double.IsFinite(point.Y)))
+            throw new ArgumentOutOfRangeException(nameof(centerPoint), centerPoint, "The zoom center must be finite.");
     }
 
     private CompositionVisual? GetCompositionVisual()

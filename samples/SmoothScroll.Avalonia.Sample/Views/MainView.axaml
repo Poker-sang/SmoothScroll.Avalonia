@@ -16,11 +16,14 @@
             <TabbedPage.Resources>
                 <x:Double x:Key="TabbedPageTabItemHeaderFontSize">20</x:Double>
             </TabbedPage.Resources>
+            <pages:PlaygroundPage />
             <pages:ZoomPage />
             <pages:ListPage />
             <pages:TextboxPage />
             <pages:ChainingPage />
             <pages:AnchorPage />
+            <pages:SnapPointsPage />
+            <pages:BringIntoViewPage />
         </TabbedPage>
         <Button
             Margin="24"

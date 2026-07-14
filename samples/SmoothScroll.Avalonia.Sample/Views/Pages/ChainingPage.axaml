@@ -165,7 +165,8 @@
                         HorizontalAlignment="Stretch">
                         <ScrollViewer.Styles>
                             <Style Selector="controls|ScrollPresenter">
-                                <Setter Property="ContentOrientation" Value="Horizontal" />
+                                <Setter Property="IsHorizontalMeasureInfinite" Value="True" />
+                                <Setter Property="IsVerticalMeasureInfinite" Value="False" />
                             </Style>
                         </ScrollViewer.Styles>
                         <StackPanel

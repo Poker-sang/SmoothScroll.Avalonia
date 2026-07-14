@@ -1,40 +1,43 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Animations;
 using Avalonia.Rendering.Composition.Expressions;
 using Avalonia.Rendering.Composition.Server;
-using Avalonia.Utilities;
 
 namespace SmoothScroll.Avalonia.Interaction;
 
 internal abstract class CustomAnimationHandler : ServerObject, IServerClockItem
 {
-    private IAnimationInstance? _animationInstance;
     private readonly CompositionAnimation _animation;
-    private TimeSpan _startTime;
     private readonly TimeSpan? _duration;
-    protected readonly ServerInteractionTracker InteractionTracker;
+    private IAnimationInstance? _animationInstance;
+    private TimeSpan _startTime;
 
     protected CustomAnimationHandler(
         ServerInteractionTracker interactionTracker,
         CompositionAnimation animation,
+        int requestId,
         ServerCompositor compositor) : base(compositor)
     {
         InteractionTracker = interactionTracker;
+        RequestId = requestId;
         _animation = animation;
-        if (animation is KeyFrameAnimation keyFrameAnimation)
-        {
-            _duration = keyFrameAnimation.Duration;
-        }
+        _duration = (animation as KeyFrameAnimation)?.Duration;
     }
 
-    public virtual void Start()
+    protected ServerInteractionTracker InteractionTracker { get; }
+
+    protected int RequestId { get; }
+
+    public void Start()
     {
         var targetProperty = InteractionTracker.GetCompositionProperty(_animation.Target!)!;
         _animationInstance = _animation.CreateInstance(InteractionTracker, null);
-        _animationInstance.Initialize(Compositor.Clock.Elapsed,
-            targetProperty.GetVariant!(InteractionTracker), targetProperty);
+        _animationInstance.Initialize(
+            Compositor.Clock.Elapsed,
+            targetProperty.GetVariant!(InteractionTracker),
+            targetProperty);
         _startTime = Compositor.Clock.Elapsed;
         Compositor.Animations.AddToClock(this);
         Activate();
@@ -52,25 +55,24 @@ internal abstract class CustomAnimationHandler : ServerObject, IServerClockItem
             return;
 
         var elapsed = Compositor.Clock.Elapsed;
-        if (_duration is not null && elapsed - _startTime > _duration)
-        {
-            Stop();
-            InteractionTracker.ChangeState(new ScaleInertiaState(
-                InteractionTracker,
-                default,
-                0,
-                requestId: 0));
-            return;
-        }
-
-        var value = _animationInstance.Evaluate(elapsed, InteractionTracker.Position);
+        var completed = _duration is { } duration && elapsed - _startTime >= duration;
+        var evaluationTime = completed ? _startTime + _duration!.Value : elapsed;
+        var value = _animationInstance.Evaluate(evaluationTime, GetCurrentValue());
         Evaluate(value);
+
+        if (!completed)
+            return;
+
+        Stop();
+        InteractionTracker.ChangeState(new IdleState(InteractionTracker, RequestId));
     }
+
+    protected abstract ExpressionVariant GetCurrentValue();
 
     protected abstract void Evaluate(ExpressionVariant animationValue);
 }
 
-internal class ScaleAnimationHandler: CustomAnimationHandler
+internal sealed class ScaleAnimationHandler : CustomAnimationHandler
 {
     private readonly Vector3D _centerPoint;
 
@@ -78,50 +80,42 @@ internal class ScaleAnimationHandler: CustomAnimationHandler
         ServerInteractionTracker interactionTracker,
         CompositionAnimation animation,
         Vector3D centerPoint,
-        ServerCompositor compositor)
-        : base(interactionTracker, animation, compositor)
+        int requestId,
+        ServerCompositor compositor) : base(interactionTracker, animation, requestId, compositor)
     {
         _centerPoint = centerPoint;
     }
 
-    public override void Start()
-    {
-        base.Start();
-    }
+    protected override ExpressionVariant GetCurrentValue() => InteractionTracker.Scale;
 
     protected override void Evaluate(ExpressionVariant animationValue)
     {
-        var scale = animationValue.Double;
-
-        var modifiedScale = Math.Clamp(scale, InteractionTracker.MinScale, InteractionTracker.MaxScale);
-        
-
-        if (!MathUtilities.AreClose(modifiedScale, InteractionTracker.MinScale)
-            && !MathUtilities.AreClose(modifiedScale, InteractionTracker.MaxScale))
-        {
-            InteractionTracker.SetScale(modifiedScale, _centerPoint, 0);
-        }
+        var scale = Math.Clamp(
+            animationValue.Double,
+            InteractionTracker.MinScale,
+            InteractionTracker.MaxScale);
+        InteractionTracker.SetScale(scale, _centerPoint, RequestId);
     }
 }
 
-internal class PositionAnimationHandler : CustomAnimationHandler
+internal sealed class PositionAnimationHandler : CustomAnimationHandler
 {
     public PositionAnimationHandler(
         ServerInteractionTracker interactionTracker,
         CompositionAnimation animation,
-        ServerCompositor compositor)
-        : base(interactionTracker, animation, compositor)
+        int requestId,
+        ServerCompositor compositor) : base(interactionTracker, animation, requestId, compositor)
     {
     }
 
+    protected override ExpressionVariant GetCurrentValue() => InteractionTracker.Position;
+
     protected override void Evaluate(ExpressionVariant animationValue)
     {
-        var position = animationValue.Vector3D;
-        var modifiedPosition = new Vector3D(
-            Math.Clamp(position.X, InteractionTracker.MinPosition.X, InteractionTracker.MaxPosition.X),
-            Math.Clamp(position.Y, InteractionTracker.MinPosition.Y, InteractionTracker.MaxPosition.Y),
-            Math.Clamp(position.Z, InteractionTracker.MinPosition.Z, InteractionTracker.MaxPosition.Z));
-
-        InteractionTracker.SetPosition(modifiedPosition, 0);
+        var position = Vector3D.Clamp(
+            animationValue.Vector3D,
+            InteractionTracker.MinPosition,
+            InteractionTracker.MaxPosition);
+        InteractionTracker.SetPosition(position, RequestId);
     }
 }

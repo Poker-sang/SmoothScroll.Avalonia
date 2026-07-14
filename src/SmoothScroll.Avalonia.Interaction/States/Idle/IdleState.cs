@@ -25,50 +25,87 @@ internal sealed class IdleState : InteractionTrackerState
 
     internal override void BeginUserManipulation(Point position, IPointer pointer)
     {
-        _interactionTracker.ChangeState(new InteractingState(_interactionTracker));
+        _interactionTracker.ChangeState(new InteractingState(_interactionTracker, AllowsOverscroll(pointer)));
     }
 
     internal override void CompleteUserManipulation()
     {
     }
 
-    internal override void AddScaleVelocity(Point origin, double delta)
+    internal override void AddScaleVelocity(Point origin, double delta, bool useInertia)
     {
         if (delta <= 0 || double.IsNaN(delta) || double.IsInfinity(delta))
-        {
             return;
+
+        if (useInertia)
+        {
+            _interactionTracker.ChangeState(new InertiaState(
+                _interactionTracker,
+                default,
+                Math.Log(delta) / 0.2,
+                origin,
+                requestId: 0));
         }
-
-        var scaleVelocity = Math.Log(delta) / 0.2;
-
-        _interactionTracker.ChangeState(new ScaleInertiaState(
-            _interactionTracker,
-            requestId: 0,
-            scaleVelocity: scaleVelocity,
-            scaleOrigin: origin));
+        else
+        {
+            var scale = Math.Clamp(
+                _interactionTracker.Scale * delta,
+                _interactionTracker.MinScale,
+                _interactionTracker.MaxScale);
+            _interactionTracker.SetScale(
+                scale,
+                new Vector3D(origin.X, origin.Y, 0),
+                InteractionTrackerValuesChangedArgs.UserRequestId);
+        }
     }
 
     internal override void ApplyManipulationDelta(Vector translationDelta)
     {
     }
 
-    internal override void StartInertia(Vector linearVelocity)
+    internal override void StartInertia(Vector linearVelocity, bool includeScaleVelocity)
     {
+        _interactionTracker.ChangeState(new InertiaState(
+            _interactionTracker,
+            new Vector3D(linearVelocity.X, linearVelocity.Y, 0),
+            0,
+            default,
+            requestId: 0));
     }
 
-    internal override void ApplyWheelDelta(Vector delta)
+    internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
-        // Constant velocity for 250ms
-        var velocityValue = delta / 0.25f;
-        var velocity = new Vector3D(velocityValue.X, velocityValue.Y, 0);
-        _interactionTracker.ChangeState(new PointerWheelInertiaState(_interactionTracker, velocity, requestId: 0));
+        if (useInertia)
+        {
+            _interactionTracker.ChangeState(new InertiaState(
+                _interactionTracker,
+                GetWheelImpulseVelocity(delta),
+                0,
+                default,
+                requestId: 0));
+        }
+        else
+        {
+            var position = Vector3D.Clamp(
+                _interactionTracker.Position + new Vector3D(delta.X, delta.Y, 0),
+                _interactionTracker.MinPosition,
+                _interactionTracker.MaxPosition);
+            _interactionTracker.SetPosition(
+                position,
+                InteractionTrackerValuesChangedArgs.UserRequestId);
+        }
     }
 
     internal override void TryUpdatePositionWithAdditionalVelocity(Vector3D velocityInPixelsPerSecond, int requestId)
     {
         // State changes to inertia and inertia modifiers are evaluated with requested velocity as initial velocity
         // TODO: inertia modifiers not yet implemented.
-        _interactionTracker.ChangeState(new ActiveInputInertiaState(_interactionTracker, velocityInPixelsPerSecond, requestId));
+        _interactionTracker.ChangeState(new InertiaState(
+            _interactionTracker,
+            velocityInPixelsPerSecond,
+            0,
+            default,
+            requestId));
     }
 
     internal override void TryUpdatePosition(Vector3D value, InteractionTrackerClampingOption option, int requestId)
@@ -88,8 +125,15 @@ internal sealed class IdleState : InteractionTrackerState
         _interactionTracker.SetPosition(clampedPosition, 0);
     }
 
-    internal override void StartAnimation(CompositionAnimation animation, Vector3D? centerPoint = null)
+    internal override void StartAnimation(
+        CompositionAnimation animation,
+        int requestId,
+        Vector3D? centerPoint = null)
     {
-        _interactionTracker.ChangeState(new CustomAnimationState(_interactionTracker, animation, centerPoint));
+        _interactionTracker.ChangeState(new CustomAnimationState(
+            _interactionTracker,
+            animation,
+            requestId,
+            centerPoint));
     }
 }

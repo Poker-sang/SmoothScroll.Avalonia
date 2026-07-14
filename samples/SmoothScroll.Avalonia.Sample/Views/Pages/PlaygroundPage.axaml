@@ -1,0 +1,620 @@
+<ContentPage
+    x:Class="SmoothScroll.Avalonia.Sample.Views.Pages.PlaygroundPage"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:SmoothScroll.Avalonia.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:interaction="using:SmoothScroll.Avalonia.Interaction"
+    xmlns:local="using:SmoothScroll.Avalonia.Sample.Views.Pages"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    x:Name="Root"
+    Header="Playground"
+    mc:Ignorable="d"
+    d:DesignHeight="720"
+    d:DesignWidth="1280">
+    <Grid ColumnDefinitions="3*,2*">
+        <Border
+            Margin="20"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+            BorderThickness="1"
+            ClipToBounds="True"
+            CornerRadius="4">
+            <controls:ScrollView
+                x:Name="PlaygroundScrollView"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                HorizontalScrollBarVisibility="Auto"
+                IsZoomEnabled="True"
+                VerticalScrollBarVisibility="Auto">
+                <Grid
+                    x:Name="PlaygroundContent"
+                    Width="960"
+                    Height="720"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    ClipToBounds="True">
+                    <Grid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Context menu works" />
+                            <MenuItem Header="Reset view" Click="ResetViewMenuItem_OnClick" />
+                        </ContextMenu>
+                    </Grid.ContextMenu>
+                    <Image
+                        Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                        Stretch="UniformToFill" />
+                    <Border
+                        Width="1"
+                        HorizontalAlignment="Center"
+                        Background="{DynamicResource SystemControlBackgroundAccentBrush}" />
+                    <Border
+                        Height="1"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource SystemControlBackgroundAccentBrush}" />
+                    <Border
+                        Margin="16"
+                        Padding="8,4"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
+                        Background="{DynamicResource SystemControlBackgroundChromeBlackMediumBrush}"
+                        CornerRadius="3">
+                        <TextBlock Foreground="White" Text="TOP LEFT" />
+                    </Border>
+                    <Border
+                        Margin="16"
+                        Padding="8,4"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Background="{DynamicResource SystemControlBackgroundChromeBlackMediumBrush}"
+                        CornerRadius="3">
+                        <TextBlock Foreground="White" Text="BOTTOM RIGHT" />
+                    </Border>
+                </Grid>
+            </controls:ScrollView>
+        </Border>
+
+        <Border
+            Grid.Column="1"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}"
+            BorderThickness="1,0,0,0">
+            <ScrollViewer
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="20" Spacing="16">
+                    <TextBlock
+                        FontSize="20"
+                        FontWeight="SemiBold"
+                        Text="ScrollView" />
+
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="Content" />
+                    <Grid
+                        ColumnDefinitions="160,*"
+                        RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                        RowSpacing="8">
+                        <TextBlock VerticalAlignment="Center" Text="Width" />
+                        <Grid Grid.Column="1" ColumnDefinitions="*,52" ColumnSpacing="8">
+                            <Slider
+                                Minimum="200"
+                                Maximum="1600"
+                                Value="{Binding #PlaygroundContent.Width, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundContent.Width, StringFormat={}{0:0}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Height" />
+                        <Grid
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="200"
+                                Maximum="1200"
+                                Value="{Binding #PlaygroundContent.Height, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundContent.Height, StringFormat={}{0:0}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Horizontal content alignment" />
+                        <ComboBox
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.HorizontalAlignments}"
+                            SelectedItem="{Binding #PlaygroundScrollView.HorizontalContentAlignment, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="3" VerticalAlignment="Center" Text="Vertical content alignment" />
+                        <ComboBox
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.VerticalAlignments}"
+                            SelectedItem="{Binding #PlaygroundScrollView.VerticalContentAlignment, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="4" VerticalAlignment="Center" Text="Child horizontal alignment" />
+                        <ComboBox
+                            Grid.Row="4"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.HorizontalAlignments}"
+                            SelectedItem="{Binding #PlaygroundContent.HorizontalAlignment, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="5" VerticalAlignment="Center" Text="Child vertical alignment" />
+                        <ComboBox
+                            Grid.Row="5"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.VerticalAlignments}"
+                            SelectedItem="{Binding #PlaygroundContent.VerticalAlignment, Mode=TwoWay}" />
+                    </Grid>
+
+                    <Separator />
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="Anchoring" />
+                    <Grid
+                        ColumnDefinitions="160,*"
+                        RowDefinitions="Auto,Auto,Auto,Auto"
+                        RowSpacing="8">
+                        <TextBlock VerticalAlignment="Center" Text="Horizontal enabled" />
+                        <ToggleSwitch
+                            x:Name="HorizontalAnchorEnabled"
+                            Grid.Column="1"
+                            IsChecked="True"
+                            IsCheckedChanged="HorizontalAnchorEnabled_OnIsCheckedChanged" />
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Horizontal ratio" />
+                        <Grid
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                x:Name="HorizontalAnchorRatioSlider"
+                                Minimum="0"
+                                Maximum="1"
+                                ValueChanged="HorizontalAnchorRatioSlider_OnValueChanged" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #HorizontalAnchorRatioSlider.Value, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Vertical enabled" />
+                        <ToggleSwitch
+                            x:Name="VerticalAnchorEnabled"
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            IsChecked="True"
+                            IsCheckedChanged="VerticalAnchorEnabled_OnIsCheckedChanged" />
+                        <TextBlock Grid.Row="3" VerticalAlignment="Center" Text="Vertical ratio" />
+                        <Grid
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                x:Name="VerticalAnchorRatioSlider"
+                                Minimum="0"
+                                Maximum="1"
+                                ValueChanged="VerticalAnchorRatioSlider_OnValueChanged" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #VerticalAnchorRatioSlider.Value, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                    </Grid>
+
+                    <Separator />
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="Scrolling" />
+                    <Grid
+                        ColumnDefinitions="160,*"
+                        RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                        RowSpacing="8">
+                        <TextBlock VerticalAlignment="Center" Text="Horizontal scroll bar" />
+                        <ComboBox
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.ScrollBarVisibilities}"
+                            SelectedItem="{Binding #PlaygroundScrollView.HorizontalScrollBarVisibility, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Vertical scroll bar" />
+                        <ComboBox
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.ScrollBarVisibilities}"
+                            SelectedItem="{Binding #PlaygroundScrollView.VerticalScrollBarVisibility, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Horizontal mode" />
+                        <ComboBox
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.ScrollModes}"
+                            SelectedItem="{Binding #PlaygroundScrollView.HorizontalScrollMode, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="3" VerticalAlignment="Center" Text="Vertical mode" />
+                        <ComboBox
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.ScrollModes}"
+                            SelectedItem="{Binding #PlaygroundScrollView.VerticalScrollMode, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="4" VerticalAlignment="Center" Text="Horizontal measure infinity" />
+                        <ToggleSwitch
+                            Grid.Row="4"
+                            Grid.Column="1"
+                            IsChecked="{Binding #PlaygroundScrollView.IsHorizontalMeasureInfinite, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="5" VerticalAlignment="Center" Text="Vertical measure infinity" />
+                        <ToggleSwitch
+                            Grid.Row="5"
+                            Grid.Column="1"
+                            IsChecked="{Binding #PlaygroundScrollView.IsVerticalMeasureInfinite, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="6" VerticalAlignment="Center" Text="Deferred scrolling" />
+                        <ToggleSwitch
+                            Grid.Row="6"
+                            Grid.Column="1"
+                            IsChecked="{Binding #PlaygroundScrollView.IsDeferredScrollingEnabled, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="7" VerticalAlignment="Center" Text="Scroll chaining" />
+                        <ToggleSwitch
+                            Grid.Row="7"
+                            Grid.Column="1"
+                            IsChecked="{Binding #PlaygroundScrollView.IsScrollChainingEnabled, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="8" VerticalAlignment="Center" Text="Scroll inertia" />
+                        <ToggleSwitch
+                            Grid.Row="8"
+                            Grid.Column="1"
+                            IsChecked="{Binding #PlaygroundScrollView.IsScrollInertiaEnabled, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="9" VerticalAlignment="Center" Text="Scroll input multiplier" />
+                        <Grid
+                            Grid.Row="9"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="0"
+                                Maximum="3"
+                                Value="{Binding #PlaygroundScrollView.ScrollInputMultiplier, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.ScrollInputMultiplier, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                    </Grid>
+
+                    <Separator />
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="Zoom" />
+                    <Grid
+                        ColumnDefinitions="160,*"
+                        RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                        RowSpacing="8">
+                        <TextBlock VerticalAlignment="Center" Text="Enabled" />
+                        <ToggleSwitch
+                            Grid.Column="1"
+                            IsChecked="{Binding #PlaygroundScrollView.IsZoomEnabled, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Minimum factor" />
+                        <Grid
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="0.1"
+                                Maximum="1"
+                                Value="{Binding #PlaygroundScrollView.MinZoomFactor, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.MinZoomFactor, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Maximum factor" />
+                        <Grid
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="1"
+                                Maximum="10"
+                                Value="{Binding #PlaygroundScrollView.MaxZoomFactor, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.MaxZoomFactor, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="3" VerticalAlignment="Center" Text="Current factor" />
+                        <Grid
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                x:Name="ZoomFactorSlider"
+                                Minimum="{Binding #PlaygroundScrollView.MinZoomFactor}"
+                                Maximum="{Binding #PlaygroundScrollView.MaxZoomFactor}"
+                                ValueChanged="ZoomFactorSlider_OnValueChanged" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.ZoomFactor, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="4" VerticalAlignment="Center" Text="Input multiplier" />
+                        <Grid
+                            Grid.Row="4"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="0"
+                                Maximum="3"
+                                Value="{Binding #PlaygroundScrollView.ZoomInputMultiplier, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.ZoomInputMultiplier, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                    </Grid>
+
+                    <Separator />
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="Physics" />
+                    <Grid
+                        ColumnDefinitions="160,*"
+                        RowDefinitions="Auto,Auto,Auto,Auto"
+                        RowSpacing="8">
+                        <TextBlock VerticalAlignment="Center" Text="Scroll decay rate" />
+                        <Grid Grid.Column="1" ColumnDefinitions="*,52" ColumnSpacing="8">
+                            <Slider
+                                Minimum="0.8"
+                                Maximum="0.999"
+                                Value="{Binding #PlaygroundScrollView.ScrollInertiaDecayRate, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.ScrollInertiaDecayRate, StringFormat={}{0:0.000}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Zoom decay rate" />
+                        <Grid
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="0.8"
+                                Maximum="0.999"
+                                Value="{Binding #PlaygroundScrollView.ZoomInertiaDecayRate, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.ZoomInertiaDecayRate, StringFormat={}{0:0.000}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Overscroll elasticity" />
+                        <Grid
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="0"
+                                Maximum="1"
+                                Value="{Binding #PlaygroundScrollView.OverscrollElasticity, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.OverscrollElasticity, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                        <TextBlock Grid.Row="3" VerticalAlignment="Center" Text="Bounce rate" />
+                        <Grid
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            ColumnDefinitions="*,52"
+                            ColumnSpacing="8">
+                            <Slider
+                                Minimum="0.1"
+                                Maximum="3"
+                                Value="{Binding #PlaygroundScrollView.OverscrollBounceRate, Mode=TwoWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Text="{Binding #PlaygroundScrollView.OverscrollBounceRate, StringFormat={}{0:0.00}}"
+                                TextAlignment="Right" />
+                        </Grid>
+                    </Grid>
+
+                    <Separator />
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="Snap points" />
+                    <Grid
+                        ColumnDefinitions="160,*"
+                        RowDefinitions="Auto,Auto,Auto,Auto"
+                        RowSpacing="8">
+                        <TextBlock VerticalAlignment="Center" Text="Horizontal type" />
+                        <ComboBox
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.SnapPointTypes}"
+                            SelectedItem="{Binding #PlaygroundScrollView.HorizontalSnapPointsType, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="Horizontal alignment" />
+                        <ComboBox
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.SnapPointAlignments}"
+                            SelectedItem="{Binding #PlaygroundScrollView.HorizontalSnapPointsAlignment, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="2" VerticalAlignment="Center" Text="Vertical type" />
+                        <ComboBox
+                            Grid.Row="2"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.SnapPointTypes}"
+                            SelectedItem="{Binding #PlaygroundScrollView.VerticalSnapPointsType, Mode=TwoWay}" />
+                        <TextBlock Grid.Row="3" VerticalAlignment="Center" Text="Vertical alignment" />
+                        <ComboBox
+                            Grid.Row="3"
+                            Grid.Column="1"
+                            HorizontalAlignment="Stretch"
+                            ItemsSource="{x:Static local:PlaygroundPage.SnapPointAlignments}"
+                            SelectedItem="{Binding #PlaygroundScrollView.VerticalSnapPointsAlignment, Mode=TwoWay}" />
+                    </Grid>
+
+                    <Separator />
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="16"
+                            FontWeight="SemiBold"
+                            Text="Gesture bindings" />
+                        <Button
+                            Grid.Column="1"
+                            Click="AddGestureButton_OnClick"
+                            Content="Add" />
+                        <Button
+                            Grid.Column="2"
+                            Click="ResetGesturesButton_OnClick"
+                            Content="Reset" />
+                    </Grid>
+                    <Grid ColumnDefinitions="1.1*,1.1*,1.2*,32" ColumnSpacing="6">
+                        <TextBlock FontWeight="SemiBold" Text="Gesture" />
+                        <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="Modifiers" />
+                        <TextBlock Grid.Column="2" FontWeight="SemiBold" Text="Action" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding #Root.GestureEditors}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:GestureBindingEditor">
+                                <Grid
+                                    Margin="0,0,0,6"
+                                    ColumnDefinitions="1.1*,1.1*,1.2*,32"
+                                    ColumnSpacing="6">
+                                    <ComboBox
+                                        ItemsSource="{x:Static local:PlaygroundPage.GestureOptions}"
+                                        SelectedItem="{Binding InputGesture, Mode=TwoWay}" />
+                                    <ComboBox
+                                        Grid.Column="1"
+                                        ItemsSource="{x:Static local:PlaygroundPage.ModifierOptions}"
+                                        SelectedItem="{Binding Modifiers, Mode=TwoWay}" />
+                                    <ComboBox
+                                        Grid.Column="2"
+                                        ItemsSource="{x:Static local:PlaygroundPage.ActionOptions}"
+                                        SelectedItem="{Binding Action, Mode=TwoWay}" />
+                                    <Button
+                                        Grid.Column="3"
+                                        Padding="0"
+                                        Click="RemoveGestureButton_OnClick"
+                                        Content="×"
+                                        Tag="{Binding}"
+                                        ToolTip.Tip="Remove binding" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Separator />
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="Navigation" />
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button Click="ZoomOutButton_OnClick" Content="Zoom out" />
+                        <Button Grid.Column="1" Click="ResetZoomButton_OnClick" Content="100%" />
+                        <Button Grid.Column="2" Click="ZoomInButton_OnClick" Content="Zoom in" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Button Click="ZoomTopLeftButton_OnClick" Content="Zoom + at top-left" />
+                        <Button Grid.Column="1" Click="ZoomBottomRightButton_OnClick" Content="Zoom + at bottom-right" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Button Click="ScrollOriginButton_OnClick" Content="Origin" />
+                        <Button Grid.Column="1" Click="ScrollCenterButton_OnClick" Content="Center" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
+                        <Button Click="ScrollByLeftButton_OnClick" Content="100 ←" ToolTip.Tip="ScrollBy left" />
+                        <Button Grid.Column="1" Click="ScrollByUpButton_OnClick" Content="100 ↑" ToolTip.Tip="ScrollBy up" />
+                        <Button Grid.Column="2" Click="ScrollByDownButton_OnClick" Content="100 ↓" ToolTip.Tip="ScrollBy down" />
+                        <Button Grid.Column="3" Click="ScrollByRightButton_OnClick" Content="100 →" ToolTip.Tip="ScrollBy right" />
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
+                        <Button Click="ScrollByViewportLeftButton_OnClick" Content="Viewport ←" />
+                        <Button Grid.Column="1" Click="ScrollByViewportUpButton_OnClick" Content="Viewport ↑" />
+                        <Button Grid.Column="2" Click="ScrollByViewportDownButton_OnClick" Content="Viewport ↓" />
+                        <Button Grid.Column="3" Click="ScrollByViewportRightButton_OnClick" Content="Viewport →" />
+                    </Grid>
+
+                    <Separator />
+                    <TextBlock
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="State" />
+                    <Grid
+                        ColumnDefinitions="180,*"
+                        RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                        RowSpacing="6">
+                        <TextBlock Text="Extent" />
+                        <TextBlock Grid.Column="1" Text="{Binding #PlaygroundScrollView.Extent}" />
+                        <TextBlock Grid.Row="1" Text="Viewport" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding #PlaygroundScrollView.Viewport}" />
+                        <TextBlock Grid.Row="2" Text="Offset" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding #PlaygroundScrollView.Offset}" />
+                        <TextBlock Grid.Row="3" Text="Scroll bar maximum" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding #PlaygroundScrollView.ScrollBarMaximum}" />
+                        <TextBlock Grid.Row="4" Text="Computed horizontal mode" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding #PlaygroundScrollView.ComputedHorizontalScrollMode}" />
+                        <TextBlock Grid.Row="5" Text="Computed vertical mode" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding #PlaygroundScrollView.ComputedVerticalScrollMode}" />
+                        <TextBlock Grid.Row="6" Text="Computed horizontal bar" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding #PlaygroundScrollView.ComputedHorizontalScrollBarVisibility}" />
+                        <TextBlock Grid.Row="7" Text="Computed vertical bar" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding #PlaygroundScrollView.ComputedVerticalScrollBarVisibility}" />
+                        <TextBlock Grid.Row="8" Text="Presenter loaded" />
+                        <TextBlock
+                            x:Name="PresenterLoadedText"
+                            Grid.Row="8"
+                            Grid.Column="1"
+                            Text="Pending" />
+                        <TextBlock Grid.Row="9" Text="Current anchor" />
+                        <TextBlock
+                            x:Name="CurrentAnchorText"
+                            Grid.Row="9"
+                            Grid.Column="1"
+                            Text="None" />
+                        <TextBlock Grid.Row="10" Text="Scroll bars expanded" />
+                        <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding #PlaygroundScrollView.IsExpanded}" />
+                        <TextBlock Grid.Row="11" Text="Anchor requests" />
+                        <TextBlock
+                            x:Name="AnchorRequestCountText"
+                            Grid.Row="11"
+                            Grid.Column="1"
+                            Text="0" />
+                        <TextBlock Grid.Row="12" Text="Last change source" />
+                        <TextBlock
+                            x:Name="LastChangeSourceText"
+                            Grid.Row="12"
+                            Grid.Column="1"
+                            Text="None" />
+                        <TextBlock Grid.Row="13" Text="Logical extent" />
+                        <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding #PlaygroundScrollView.LogicalExtent}" />
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</ContentPage>

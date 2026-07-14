@@ -1,169 +1,141 @@
 ﻿using Avalonia;
 using Avalonia.Input;
 using Avalonia.Rendering.Composition.Animations;
-using Avalonia.Utilities;
 
 namespace SmoothScroll.Avalonia.Interaction;
 
-internal abstract class InertiaState : InteractionTrackerState
+internal sealed class InertiaState : InteractionTrackerState
 {
-    private const double MaxPointerWheelVelocity = 8000.0;
-
-    protected IInteractionTrackerInertiaHandler Handler = null!;
-
-    protected readonly int RequestId;
+    private readonly CombinedInertiaHandler _handler;
+    private readonly int _requestId;
 
     internal override string Name => "InertiaState";
 
-    protected InertiaState(
+    public InertiaState(
         ServerInteractionTracker interactionTracker,
-        int requestId) : base(interactionTracker)
+        Vector3D positionVelocity,
+        double scaleVelocity,
+        Point scaleOrigin,
+        int requestId,
+        bool allowOverscroll = false) : base(interactionTracker)
     {
-        RequestId = requestId;
+        _requestId = requestId;
+        _handler = new CombinedInertiaHandler(
+            interactionTracker.Compositor,
+            interactionTracker,
+            positionVelocity,
+            scaleVelocity,
+            scaleOrigin,
+            requestId,
+            allowOverscroll);
+        EnterState();
     }
 
-    protected sealed override void EnterState()
+    protected override void EnterState()
     {
-        _interactionTracker.NotifyInertiaStateEntered(
-            Handler.FinalModifiedPosition,
-            Math.Clamp(Handler.FinalModifiedScale, _interactionTracker.MinScale, _interactionTracker.MaxScale),
-            Handler.FinalPosition,
-            Handler.FinalModifiedScale,
-            Handler.InitialVelocity,
-            RequestId,
-            scaleVelocityInPercentPerSecond: 0.0f,
-            isInertiaFromImpulse: false,
-            isFromBinding: false);
-
-        // If TryUpdatePosition is called with clamping option disabled, the position set can go outside the [MinPosition..MaxPosition] range.
-        // We adjust MinPosition/MaxPosition when we enter idle.
-        // Docs around InteractionTrackerClampingOption.Disabled: https://learn.microsoft.com/uwp/api/windows.ui.composition.interactions.interactiontrackerclampingoption
-        // > If the input value is greater (or less) than the max (or min) value, it is not immediately
-        // > clamped. Instead, the max/min is enforced to the newly input value
-        // > of Position (and potentially clamped) the next time InteractionTracker enters
-        // > the Inertia state.
-        // TODO: Commented out for now. It's wrong to do this when transitioning from interacting to inertia.
-       
-        //var position = InteractionTracker.Position;
-        //InteractionTracker.MinPosition = Vector3.Min(InteractionTracker.MinPosition, position);
-        //InteractionTracker.MaxPosition = Vector3.Max(InteractionTracker.MaxPosition, position);
-
-        Handler.Start();
+        NotifyStateEntered();
+        _handler.Start();
     }
 
     internal override void BeginUserManipulation(Point position, IPointer pointer)
     {
-        Handler.Stop();
-        _interactionTracker.ChangeState(new InteractingState(_interactionTracker));
+        _handler.Stop();
+        _interactionTracker.ChangeState(new InteractingState(_interactionTracker, AllowsOverscroll(pointer)));
     }
 
     internal override void CompleteUserManipulation()
     {
     }
 
-    internal override void AddScaleVelocity(Point origin, double delta)
+    internal override void AddScaleVelocity(Point origin, double delta, bool useInertia)
     {
-        if (delta <= 0 || double.IsNaN(delta) || double.IsInfinity(delta))
-        {
+        if (delta <= 0 || !double.IsFinite(delta))
             return;
-        }
 
-        Handler.Stop();
-
-        var inputVelocity = Math.Log(delta) / 0.2;
-
-        var accumulatedVelocity = inputVelocity;
-        if (Handler is ScaleInertiaHandler pw)
+        if (useInertia)
         {
-            var isOpposite = (pw.ScaleVelocity > 0 && inputVelocity < 0) || (pw.ScaleVelocity < 0 && inputVelocity > 0);
-
-            accumulatedVelocity = isOpposite
-                ? inputVelocity
-                : pw.ScaleVelocity + inputVelocity;
+            _handler.AddScaleImpulse(origin, Math.Log(delta) / 0.2);
+            NotifyStateEntered();
         }
-
-        _interactionTracker.ChangeState(new ScaleInertiaState(
-            _interactionTracker,
-            origin,
-            accumulatedVelocity,
-            0));
+        else
+        {
+            _handler.ApplyScaleDelta(origin, delta);
+        }
     }
 
     internal override void ApplyManipulationDelta(Vector translationDelta)
     {
     }
 
-    internal override void StartInertia(Vector linearVelocity)
+    internal override void StartInertia(Vector linearVelocity, bool includeScaleVelocity)
     {
+        _handler.AddTranslationImpulse(new Vector3D(linearVelocity.X, linearVelocity.Y, 0));
+        NotifyStateEntered();
     }
 
-    internal override void ApplyWheelDelta(Vector delta)
+    internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
-        var newDelta = new Vector3D(delta.X, delta.Y, 0);
-        var totalDelta = (Handler.FinalModifiedPosition - _interactionTracker.Position) + newDelta;
-        var targetVelocity = Vector3D.Divide(totalDelta, 0.25);
-
-        Vector3D velocity;
-
-        if (Handler is PointerWheelInertiaHandler pw)
+        _handler.DisableOverscroll();
+        if (useInertia)
         {
-            var isOpposite = Vector3D.Dot(newDelta, pw.Velocity) < 0;
-
-            velocity = isOpposite
-                ? targetVelocity
-                : Vector3D.Add(pw.Velocity, targetVelocity);
+            _handler.AddTranslationImpulse(GetWheelImpulseVelocity(delta));
+            NotifyStateEntered();
         }
         else
         {
-            velocity = targetVelocity;
+            _handler.ApplyTranslationDelta(delta);
         }
-
-        if (velocity.Length > MaxPointerWheelVelocity)
-        {
-            velocity = Vector3D.Multiply(velocity, MaxPointerWheelVelocity / velocity.Length);
-        }
-
-        _interactionTracker.ChangeState(new PointerWheelInertiaState(
-            _interactionTracker,
-            velocity,
-            requestId: 0));
-        Handler.Stop();
-    }
-
-    internal override void TryUpdatePositionWithAdditionalVelocity(Vector3D velocityInPixelsPerSecond, int requestId)
-    {
-        // Inertia is restarted (state re-enters inertia) and inertia modifiers are evaluated with requested velocity added to current velocity
-        _interactionTracker.ChangeState(new ActiveInputInertiaState(
-            _interactionTracker, 
-            Handler.InitialVelocity + velocityInPixelsPerSecond,
-            requestId));
-        Handler.Stop();
-    }
-
-    internal override void TryUpdatePosition(Vector3D value, InteractionTrackerClampingOption option, int requestId)
-    {
-        if (option == InteractionTrackerClampingOption.Auto)
-        {
-            value = Vector3D.Clamp(value, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
-        }
-
-        _interactionTracker.SetPosition(value, requestId);
-        _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId));
-        Handler.Stop();
     }
 
     internal override void ReceiveBoundsUpdate()
     {
-        if(Handler is ActiveInputInertiaHandler activeInputInertiaHandler)
-        {
-            activeInputInertiaHandler.ReceiveBoundsUpdate();
-        }
+        _handler.ClampRestingPositionToBounds();
     }
 
-    internal override void StartAnimation(CompositionAnimation animation, Vector3D? scaleCenterPoint = null)
+    internal override void UpdateInertiaRestingPosition(Vector3D position, int requestId) =>
+        _handler.UpdateRestingPosition(position);
+
+    internal override void TryUpdatePositionWithAdditionalVelocity(Vector3D velocityInPixelsPerSecond, int requestId)
     {
-        Handler.Stop();
-        _interactionTracker.ChangeState(new CustomAnimationState(_interactionTracker, animation, scaleCenterPoint));
+        _handler.AddTranslationImpulse(velocityInPixelsPerSecond);
+        NotifyStateEntered();
     }
 
+    internal override void TryUpdatePosition(
+        Vector3D value,
+        InteractionTrackerClampingOption option,
+        int requestId)
+    {
+        _handler.Stop();
+        if (option is InteractionTrackerClampingOption.Auto)
+            value = Vector3D.Clamp(value, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+
+        _interactionTracker.SetPosition(value, requestId);
+        _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId));
+    }
+
+    internal override void StartAnimation(
+        CompositionAnimation animation,
+        int requestId,
+        Vector3D? scaleCenterPoint = null)
+    {
+        _handler.Stop();
+        _interactionTracker.ChangeState(new CustomAnimationState(
+            _interactionTracker,
+            animation,
+            requestId,
+            scaleCenterPoint));
+    }
+
+    private void NotifyStateEntered() =>
+        _interactionTracker.NotifyInertiaStateEntered(
+            _handler.ModifiedRestingPosition,
+            _handler.ModifiedRestingScale,
+            _handler.NaturalRestingPosition,
+            _handler.NaturalRestingScale,
+            _handler.PositionVelocity,
+            _requestId,
+            (float)_handler.ScaleVelocity,
+            isInertiaFromImpulse: true,
+            isFromBinding: false);
 }
