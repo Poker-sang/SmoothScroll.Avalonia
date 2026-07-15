@@ -33,6 +33,7 @@ internal abstract class InteractionTrackerState
     internal abstract void ReceiveBoundsUpdate();
     internal abstract void TryUpdatePositionWithAdditionalVelocity(Vector3D velocityInPixelsPerSecond, int requestId);
     internal abstract void TryUpdatePosition(Vector3D value, InteractionTrackerClampingOption option, int requestId);
+    internal abstract void TryUpdateScale(double scale, Vector3D centerPoint, int requestId);
 
     internal virtual void UpdateInertiaRestingPosition(Vector3D position, int requestId) =>
         _interactionTracker.NotifyRequestIgnored(requestId);
@@ -42,5 +43,6 @@ internal abstract class InteractionTrackerState
         int requestId,
         Vector3D? scaleCenterPoint = null)
     {
+        _interactionTracker.NotifyRequestIgnored(requestId);
     }
 }

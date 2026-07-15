@@ -162,7 +162,10 @@ internal partial class ServerInteractionTracker
                     State.TryUpdatePosition(tryUpdatePositionRequest.Position, tryUpdatePositionRequest.ClampingOption, tryUpdatePositionRequest.RequestId);
                     break;
                 case TryUpdateScaleRequest tryUpdateScaleRequest:
-                    SetScale(tryUpdateScaleRequest.Scale, tryUpdateScaleRequest.CenterPoint, tryUpdateScaleRequest.RequestId);
+                    State.TryUpdateScale(
+                        tryUpdateScaleRequest.Scale,
+                        tryUpdateScaleRequest.CenterPoint,
+                        tryUpdateScaleRequest.RequestId);
                     break;
                 case BeginUserManipulationRequest beginUserManipulationRequest:
                     State.BeginUserManipulation(beginUserManipulationRequest.Position, beginUserManipulationRequest.Pointer);

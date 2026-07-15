@@ -566,7 +566,7 @@
                         Text="State" />
                     <Grid
                         ColumnDefinitions="180,*"
-                        RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                        RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                         RowSpacing="6">
                         <TextBlock Text="Extent" />
                         <TextBlock Grid.Column="1" Text="{Binding #PlaygroundScrollView.Extent}" />
@@ -612,6 +612,14 @@
                             Text="None" />
                         <TextBlock Grid.Row="13" Text="Logical extent" />
                         <TextBlock Grid.Row="13" Grid.Column="1" Text="{Binding #PlaygroundScrollView.LogicalExtent}" />
+                        <TextBlock Grid.Row="14" Text="Interaction state" />
+                        <TextBlock Grid.Row="14" Grid.Column="1" Text="{Binding #PlaygroundScrollView.State}" />
+                        <TextBlock Grid.Row="15" Text="Last operation" />
+                        <TextBlock
+                            x:Name="LastOperationText"
+                            Grid.Row="15"
+                            Grid.Column="1"
+                            Text="None" />
                     </Grid>
                 </StackPanel>
             </ScrollViewer>

@@ -283,6 +283,216 @@ public sealed class ScrollViewHeadlessTests
     }
 
     [AvaloniaFact]
+    public void NoOpNavigationDoesNotCreateAnOperation()
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(1600, 1200),
+            view => view.IsZoomEnabled = true);
+        var started = 0;
+        var completed = 0;
+        host.View.ScrollStarting += (_, _) => started++;
+        host.View.ScrollCompleted += (_, _) => completed++;
+        host.View.ZoomStarting += (_, _) => started++;
+        host.View.ZoomCompleted += (_, _) => completed++;
+
+        Assert.Equal(ScrollView.NoCorrelationId, host.View.ScrollTo(default, isAnimated: false));
+        Assert.Equal(ScrollView.NoCorrelationId, host.View.ZoomTo(1, isAnimated: false));
+        _ = host.Render();
+
+        Assert.Equal(0, started);
+        Assert.Equal(0, completed);
+    }
+
+    [AvaloniaFact]
+    public void ImmediateOperationsUseMatchingCorrelationIdsAndOrderedEvents()
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(1600, 1200),
+            view =>
+            {
+                view.IsZoomEnabled = true;
+                view.IsScrollInertiaEnabled = false;
+            });
+        var scrollEvents = new List<string>();
+        var zoomEvents = new List<string>();
+        ScrollingScrollStartingEventArgs? scrollStarting = null;
+        ScrollingScrollCompletedEventArgs? scrollCompleted = null;
+        ScrollingZoomStartingEventArgs? zoomStarting = null;
+        ScrollingZoomCompletedEventArgs? zoomCompleted = null;
+        host.View.ScrollStarting += (_, args) =>
+        {
+            scrollStarting = args;
+            scrollEvents.Add("Starting");
+        };
+        host.View.ScrollChanged += (_, _) => scrollEvents.Add("Changed");
+        host.View.ScrollCompleted += (_, args) =>
+        {
+            scrollCompleted = args;
+            scrollEvents.Add("Completed");
+        };
+        host.View.ZoomStarting += (_, args) =>
+        {
+            zoomStarting = args;
+            zoomEvents.Add("Starting");
+        };
+        host.View.ZoomChanged += (_, _) => zoomEvents.Add("Changed");
+        host.View.ZoomCompleted += (_, args) =>
+        {
+            zoomCompleted = args;
+            zoomEvents.Add("Completed");
+        };
+
+        var scrollId = host.View.ScrollTo(new Vector(120, 80), isAnimated: false);
+        _ = host.Render();
+
+        Assert.True(scrollId > 0);
+        Assert.Equal(scrollId, scrollStarting?.CorrelationId);
+        Assert.Equal(scrollId, scrollCompleted?.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, scrollCompleted?.Result);
+        Assert.Equal(new Vector(120, 80), scrollCompleted?.FinalOffset);
+        Assert.Equal(["Starting", "Changed", "Completed"], scrollEvents);
+
+        var zoomId = host.View.ZoomTo(2, isAnimated: false);
+        _ = host.Render();
+
+        Assert.True(zoomId > scrollId);
+        Assert.Equal(zoomId, zoomStarting?.CorrelationId);
+        Assert.Equal(zoomId, zoomCompleted?.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, zoomCompleted?.Result);
+        Assert.Equal(2, zoomCompleted?.FinalZoomFactor);
+        Assert.Equal(["Starting", "Changed", "Completed"], zoomEvents);
+        Assert.Equal(ScrollingInteractionState.Idle, host.View.State);
+    }
+
+    [AvaloniaFact]
+    public void WritableOffsetAndZoomFactorCreateProgrammaticOperations()
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(1600, 1200),
+            view => view.IsZoomEnabled = true);
+        ScrollingScrollStartingEventArgs? scrollStarting = null;
+        ScrollingScrollCompletedEventArgs? scrollCompleted = null;
+        ScrollingZoomStartingEventArgs? zoomStarting = null;
+        ScrollingZoomCompletedEventArgs? zoomCompleted = null;
+        host.View.ScrollStarting += (_, args) => scrollStarting = args;
+        host.View.ScrollCompleted += (_, args) => scrollCompleted = args;
+        host.View.ZoomStarting += (_, args) => zoomStarting = args;
+        host.View.ZoomCompleted += (_, args) => zoomCompleted = args;
+
+        host.View.Offset = new Vector(90, 70);
+        _ = host.Render();
+        host.View.ZoomFactor = 1.5;
+        _ = host.Render();
+
+        Assert.Equal(ScrollChangeSource.Programmatic, scrollStarting?.ChangeSource);
+        Assert.Equal(scrollStarting?.CorrelationId, scrollCompleted?.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, scrollCompleted?.Result);
+        Assert.Equal(ScrollChangeSource.Programmatic, zoomStarting?.ChangeSource);
+        Assert.Equal(zoomStarting?.CorrelationId, zoomCompleted?.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, zoomCompleted?.Result);
+    }
+
+    [AvaloniaFact]
+    public void NewAnimatedOperationInterruptsThePreviousTrackerOperation()
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(1600, 1200),
+            view => view.IsZoomEnabled = true);
+        var scrollCompletions = new List<ScrollingScrollCompletedEventArgs>();
+        var zoomCompletions = new List<ScrollingZoomCompletedEventArgs>();
+        var states = new List<ScrollingInteractionState>();
+        host.View.ScrollCompleted += (_, args) => scrollCompletions.Add(args);
+        host.View.ZoomCompleted += (_, args) =>
+        {
+            Assert.Equal(ScrollingInteractionState.Idle, host.View.State);
+            zoomCompletions.Add(args);
+        };
+        host.View.StateChanged += (_, _) => states.Add(host.View.State);
+
+        var scrollId = host.View.ScrollTo(new Vector(700, 500), isAnimated: true);
+        _ = host.Render();
+        var zoomId = host.View.ZoomTo(2, isAnimated: true);
+
+        for (var i = 0; i < 50; i++)
+        {
+            Thread.Sleep(10);
+            _ = host.Render();
+        }
+
+        var scrollCompletion = Assert.Single(scrollCompletions);
+        var zoomCompletion = Assert.Single(zoomCompletions);
+        Assert.Equal(scrollId, scrollCompletion.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Interrupted, scrollCompletion.Result);
+        Assert.Equal(zoomId, zoomCompletion.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, zoomCompletion.Result);
+        Assert.Contains(ScrollingInteractionState.Animation, states);
+        Assert.Contains(ScrollingInteractionState.Idle, states);
+    }
+
+    [AvaloniaFact]
+    public void NewAnimatedScrollInterruptsThePreviousScrollOperation()
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(1600, 1200));
+        var completions = new List<ScrollingScrollCompletedEventArgs>();
+        host.View.ScrollCompleted += (_, args) => completions.Add(args);
+
+        var firstId = host.View.ScrollTo(new Vector(700, 500), isAnimated: true);
+        _ = host.Render();
+        var secondId = host.View.ScrollTo(new Vector(100, 200), isAnimated: true);
+
+        for (var i = 0; i < 50; i++)
+        {
+            Thread.Sleep(10);
+            _ = host.Render();
+        }
+
+        Assert.Equal(2, completions.Count);
+        Assert.Equal(firstId, completions[0].CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Interrupted, completions[0].Result);
+        Assert.Equal(secondId, completions[1].CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, completions[1].Result);
+    }
+
+    [AvaloniaFact]
+    public void UserDragCreatesAnOperationAndReportsInteractionState()
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(1600, 1200),
+            view => view.IsScrollInertiaEnabled = false);
+        var states = new List<ScrollingInteractionState>();
+        ScrollingScrollStartingEventArgs? starting = null;
+        ScrollingScrollCompletedEventArgs? completed = null;
+        host.View.StateChanged += (_, _) => states.Add(host.View.State);
+        host.View.ScrollStarting += (_, args) => starting = args;
+        host.View.ScrollCompleted += (_, args) => completed = args;
+        var center = new Point(400, 300);
+
+        host.Window.MouseDown(center, MouseButton.Left);
+        host.Window.MouseMove(new Point(320, 250), RawInputModifiers.LeftMouseButton);
+        host.Window.MouseMove(new Point(280, 220), RawInputModifiers.LeftMouseButton);
+        _ = host.Render();
+        Assert.Equal(ScrollingInteractionState.Interaction, host.View.State);
+
+        host.Window.MouseUp(new Point(280, 220), MouseButton.Left);
+        _ = host.Render();
+
+        Assert.NotNull(starting);
+        Assert.Equal(ScrollChangeSource.User, starting.ChangeSource);
+        Assert.NotNull(completed);
+        Assert.Equal(starting.CorrelationId, completed.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, completed.Result);
+        Assert.Contains(ScrollingInteractionState.Interaction, states);
+        Assert.Equal(ScrollingInteractionState.Idle, host.View.State);
+    }
+
+    [AvaloniaFact]
     public void ActivePinchZoomQueuesThrottledArrangeBeforeContactsAreReleased()
     {
         using var host = new ScrollViewHost(
@@ -1082,12 +1292,24 @@ public sealed class ScrollViewHeadlessTests
                 view.IsScrollInertiaEnabled = true;
             });
         var center = new Point(350, 250);
+        ScrollingScrollStartingEventArgs? scrollStarting = null;
+        ScrollingZoomStartingEventArgs? zoomStarting = null;
+        ScrollingScrollCompletedEventArgs? scrollCompleted = null;
+        ScrollingZoomCompletedEventArgs? zoomCompleted = null;
+        var states = new List<ScrollingInteractionState>();
+        host.View.ScrollStarting += (_, args) => scrollStarting ??= args;
+        host.View.ZoomStarting += (_, args) => zoomStarting ??= args;
+        host.View.ScrollCompleted += (_, args) => scrollCompleted = args;
+        host.View.ZoomCompleted += (_, args) => zoomCompleted = args;
+        host.View.StateChanged += (_, _) => states.Add(host.View.State);
 
         host.Window.MouseWheel(center, new Vector(0, 1), RawInputModifiers.Control);
         Thread.Sleep(25);
         _ = host.Render();
         var zoomAfterScaleImpulse = host.View.ZoomFactor;
         var offsetAfterScaleImpulse = host.View.Offset.Y;
+        Assert.Equal(ScrollingInteractionState.Inertia, host.View.State);
+        Assert.NotNull(zoomStarting);
 
         host.Window.MouseWheel(center, new Vector(0, -1));
         Thread.Sleep(40);
@@ -1095,6 +1317,22 @@ public sealed class ScrollViewHeadlessTests
 
         Assert.True(host.View.ZoomFactor > zoomAfterScaleImpulse);
         Assert.True(host.View.Offset.Y > offsetAfterScaleImpulse);
+        Assert.NotNull(scrollStarting);
+        Assert.NotEqual(scrollStarting.CorrelationId, zoomStarting.CorrelationId);
+
+        for (var i = 0; i < 120 && host.View.State is not ScrollingInteractionState.Idle; i++)
+        {
+            Thread.Sleep(10);
+            _ = host.Render();
+        }
+
+        Assert.Equal(ScrollingInteractionState.Idle, host.View.State);
+        Assert.Equal(scrollStarting.CorrelationId, scrollCompleted?.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, scrollCompleted?.Result);
+        Assert.Equal(zoomStarting.CorrelationId, zoomCompleted?.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, zoomCompleted?.Result);
+        Assert.Contains(ScrollingInteractionState.Inertia, states);
+        Assert.Contains(ScrollingInteractionState.Idle, states);
     }
 
     private static PixelRect FindRedBounds(WriteableBitmap bitmap)

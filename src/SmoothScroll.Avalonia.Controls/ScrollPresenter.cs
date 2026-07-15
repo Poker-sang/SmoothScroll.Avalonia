@@ -158,7 +158,13 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     private CompositionAnimationGroup? _animationGroup;
     private bool _compositionUpdate;
     private bool _scaleChanged;
-    private long? _requestId;
+    private int? _requestId;
+    private int? _scrollRequestId;
+    private int? _zoomRequestId;
+    private int _scrollCorrelationId = ScrollView.NoCorrelationId;
+    private int _zoomCorrelationId = ScrollView.NoCorrelationId;
+    private bool _scrollRequestAnimated;
+    private bool _zoomRequestAnimated;
     private bool _arranging;
     private HashSet<Control>? _anchorCandidates;
     private Control? _anchorElement;
@@ -186,8 +192,11 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     private ScrollChangeSource _changeSource = ScrollChangeSource.Layout;
     private ScrollMode _computedHorizontalScrollMode = ScrollMode.Disabled;
     private ScrollMode _computedVerticalScrollMode = ScrollMode.Disabled;
+    private ScrollingInteractionState _interactionState;
 
     private bool IsScrollViewerHost => _scrollViewOwner is null && _owner is not null;
+
+    private bool HasActiveTrackerRequest => _scrollRequestId is not null || _zoomRequestId is not null;
 
     internal bool HasPendingArrange => _hasPendingArrange;
 
@@ -507,9 +516,21 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         var startingPosition = Offset;
         if (!isAnimated || _interactionTracker is null || GetCompositionVisual() is not { } visual)
         {
-            ScrollTo(endPosition, isAnimated: false, ScrollChangeSource.Programmatic);
+            _ = ScrollTo(endPosition, isAnimated: false, ScrollChangeSource.Programmatic);
             return true;
         }
+
+        if (_interactionState is ScrollingInteractionState.Interaction)
+            return false;
+
+        InterruptOperationsForTrackerRequest();
+        var correlationId = BeginScrollOperation(
+            startingPosition,
+            endPosition,
+            isAnimated: true,
+            ScrollChangeSource.Programmatic);
+        if (_scrollViewOwner is { } owner && !owner.IsScrollOperationActive(correlationId))
+            return true;
 
         var animation = visual.Compositor.CreateVector3DKeyFrameAnimation();
         animation.Duration = TimeSpan.FromMilliseconds(BringIntoViewAnimationDurationMilliseconds);
@@ -517,8 +538,12 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         animation.InsertKeyFrame(1f, new Vector3D(trackerEndPosition.X, trackerEndPosition.Y, 0), new CircularEaseOut());
         var args = new ScrollAnimationStartingEventArgs(animation, startingPosition, endPosition);
         ScrollAnimationStarting?.Invoke(this, args);
+        if (_scrollViewOwner is { } currentOwner && !currentOwner.IsScrollOperationActive(correlationId))
+            return true;
+
         _changeSource = ScrollChangeSource.Programmatic;
-        _requestId = _interactionTracker.TryUpdatePositionWithAnimation(args.Animation);
+        _scrollRequestId = _interactionTracker.TryUpdatePositionWithAnimation(args.Animation);
+        _requestId = _scrollRequestId;
         return true;
     }
 
@@ -574,6 +599,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         var compositionVisual = GetCompositionVisual();
+        InterruptOperations();
+        SetInteractionState(ScrollingInteractionState.Idle);
         base.OnDetachedFromVisualTree(e);
         StopArrangeTimer();
         ClearScrollAnimation(compositionVisual);
@@ -644,6 +671,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     private void DisposeInteractionTracker()
     {
+        InterruptOperations();
+        SetInteractionState(ScrollingInteractionState.Idle);
         _interactionSource?.Dispose();
         _interactionSource = null;
         _interactionTracker?.Dispose();
@@ -716,14 +745,19 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         _ownerSubscriptions = null;
         _owner = null;
         _scrollViewOwner = owner;
+        owner.UpdateInteractionState(_interactionState);
         UpdateOwnerConfiguration(owner);
-        SetOffsetFromOwner(owner.Offset, ScrollChangeSource.Programmatic);
+        SetCurrentValue(OffsetProperty, owner.Offset);
     }
 
     internal void DetachFromScrollView(ScrollView owner)
     {
         if (ReferenceEquals(_scrollViewOwner, owner))
+        {
+            InterruptOperations();
+            owner.UpdateInteractionState(ScrollingInteractionState.Idle);
             _scrollViewOwner = null;
+        }
     }
 
     internal void UpdateOwnerConfiguration(ScrollView owner)
@@ -757,10 +791,36 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         UpdateInteractionOptions();
     }
 
-    internal void SetOffsetFromOwner(Vector offset, ScrollChangeSource source)
+    internal int SetOffsetFromOwner(Vector startingOffset, Vector offset, ScrollChangeSource source)
     {
+        offset = ClampOffsetToEnabledAxes(offset);
+        if (Offset.NearlyEquals(offset) || _interactionState is ScrollingInteractionState.Interaction)
+            return ScrollView.NoCorrelationId;
+
+        var completeOnIdle = HasActiveTrackerRequest
+                             || _interactionState is ScrollingInteractionState.Inertia or ScrollingInteractionState.Animation;
+        InterruptOperationsForTrackerRequest();
+        var correlationId = BeginScrollOperation(
+            startingOffset,
+            offset,
+            isAnimated: false,
+            source,
+            completeOnIdle);
+        if (_scrollViewOwner is { } owner && !owner.IsScrollOperationActive(correlationId))
+            return correlationId;
+
         _changeSource = source;
         SetCurrentValue(OffsetProperty, offset);
+        _scrollRequestId = _requestId;
+        if (_scrollRequestId is null)
+        {
+            SynchronizeScrollViewOwner(source);
+            Dispatcher.UIThread.Post(
+                () => CompleteScrollOperation(ScrollingOperationResult.Completed),
+                DispatcherPriority.Render);
+        }
+
+        return correlationId;
     }
 
     /// <inheritdoc/>
@@ -1550,6 +1610,10 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     public void RequestIgnored(InteractionTracker sender, InteractionTrackerRequestIgnoredArgs args)
     {
+        if (args.RequestId == _scrollRequestId)
+            CompleteScrollOperation(ScrollingOperationResult.Ignored);
+        if (args.RequestId == _zoomRequestId)
+            CompleteZoomOperation(ScrollingOperationResult.Ignored);
     }
 
     public void ValuesChanged(InteractionTracker sender, InteractionTrackerValuesChangedArgs args)
@@ -1573,6 +1637,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
             try
             {
+                var previousOffset = Offset;
+                var previousZoomFactor = ZoomFactor;
                 _compositionUpdate = true;
                 _scaleChanged = !MathUtilities.AreClose(scale, ZoomFactor);
 
@@ -1591,6 +1657,21 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
                     // composition clock without arranging on every frame.
                     RequestArrangeOnScroll();
                 }
+
+                var source = args.IsUserInitiated ? ScrollChangeSource.User : _changeSource;
+                if (source is ScrollChangeSource.User)
+                {
+                    var zoomChanged = !MathUtilities.AreClose(previousZoomFactor, ZoomFactor);
+                    var hasIndependentTranslation = !zoomChanged
+                                                    || _inertiaArgs is
+                                                    {
+                                                        PositionVelocityInPixelsPerSecond: not { X: 0, Y: 0, Z: 0 }
+                                                    };
+                    if (hasIndependentTranslation && !previousOffset.NearlyEquals(Offset))
+                        EnsureUserScrollOperation(previousOffset, Offset);
+                    if (zoomChanged)
+                        EnsureUserZoomOperation(previousZoomFactor, ZoomFactor);
+                }
             }
             finally
             {
@@ -1598,8 +1679,20 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
                 _scaleChanged = false;
             }
 
-            SynchronizeScrollViewOwner(
-                args.IsUserInitiated ? ScrollChangeSource.User : _changeSource);
+            var changeSource = args.IsUserInitiated ? ScrollChangeSource.User : _changeSource;
+            SynchronizeScrollViewOwner(changeSource);
+
+            if (args.RequestId == _scrollRequestId && !_scrollRequestAnimated)
+                CompleteScrollOperation(ScrollingOperationResult.Completed);
+            if (args.RequestId == _zoomRequestId && !_zoomRequestAnimated)
+                CompleteZoomOperation(ScrollingOperationResult.Completed);
+            if (changeSource is ScrollChangeSource.User && _interactionState is ScrollingInteractionState.Idle)
+            {
+                CompleteScrollOperation(ScrollingOperationResult.Completed);
+                CompleteZoomOperation(ScrollingOperationResult.Completed);
+            }
+            if (_interactionState is ScrollingInteractionState.Idle)
+                _changeSource = ScrollChangeSource.Layout;
         }
 
         if (Dispatcher.UIThread.CheckAccess())
@@ -1615,6 +1708,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
 
     void IInteractionTrackerOwner.CustomAnimationStateEntered(InteractionTracker sender, InteractionTrackerCustomAnimationStateEnteredArgs args)
     {
+        SetInteractionState(ScrollingInteractionState.Animation);
         // The initiating ScrollTo/ZoomTo request records its source before the animation starts.
         // Do not overwrite it here, as internal user or layout requests must retain their origin.
     }
@@ -1622,6 +1716,17 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     void IInteractionTrackerOwner.IdleStateEntered(InteractionTracker sender, InteractionTrackerIdleStateEnteredArgs args)
     {
         _inertiaArgs = null;
+        SetInteractionState(ScrollingInteractionState.Idle);
+
+        CompleteScrollOperation(
+            _scrollRequestId is null || _scrollRequestId == args.RequestId
+                ? ScrollingOperationResult.Completed
+                : ScrollingOperationResult.Interrupted);
+        CompleteZoomOperation(
+            _zoomRequestId is null || _zoomRequestId == args.RequestId
+                ? ScrollingOperationResult.Completed
+                : ScrollingOperationResult.Interrupted);
+        _changeSource = ScrollChangeSource.Layout;
         Dispatcher.UIThread.Post(InvalidateArrange);
     }
 
@@ -1629,15 +1734,131 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     {
         _changeSource = args.RequestId is 0 ? ScrollChangeSource.User : ScrollChangeSource.Programmatic;
         _inertiaArgs = args;
+        SetInteractionState(ScrollingInteractionState.Inertia);
         EnsureScrollAnimation();
         UpdateScrollModified();
     }
 
     void IInteractionTrackerOwner.InteractingStateEntered(InteractionTracker sender, InteractionTrackerInteractingStateEnteredArgs args)
     {
+        InterruptOperations();
         _changeSource = ScrollChangeSource.User;
         _inertiaArgs = null;
+        SetInteractionState(ScrollingInteractionState.Interaction);
         EnsureScrollAnimation();
+    }
+
+    private int BeginScrollOperation(
+        Vector startingOffset,
+        Vector targetOffset,
+        bool isAnimated,
+        ScrollChangeSource source,
+        bool completeOnIdle = false)
+    {
+        CompleteScrollOperation(ScrollingOperationResult.Interrupted);
+        if (_scrollViewOwner is not { } owner)
+            return ScrollView.NoCorrelationId;
+
+        var correlationId = owner.BeginScrollOperation(
+            startingOffset,
+            targetOffset,
+            isAnimated,
+            source);
+        if (!owner.IsScrollOperationActive(correlationId))
+            return correlationId;
+
+        _scrollCorrelationId = correlationId;
+        _scrollRequestAnimated = isAnimated || completeOnIdle;
+        return correlationId;
+    }
+
+    private int BeginZoomOperation(
+        double startingZoomFactor,
+        double targetZoomFactor,
+        Point? centerPoint,
+        bool isAnimated,
+        ScrollChangeSource source,
+        bool completeOnIdle = false)
+    {
+        CompleteZoomOperation(ScrollingOperationResult.Interrupted);
+        if (_scrollViewOwner is not { } owner)
+            return ScrollView.NoCorrelationId;
+
+        var correlationId = owner.BeginZoomOperation(
+            startingZoomFactor,
+            targetZoomFactor,
+            centerPoint,
+            isAnimated,
+            source);
+        if (!owner.IsZoomOperationActive(correlationId))
+            return correlationId;
+
+        _zoomCorrelationId = correlationId;
+        _zoomRequestAnimated = isAnimated || completeOnIdle;
+        return correlationId;
+    }
+
+    private void EnsureUserScrollOperation(Vector startingOffset, Vector targetOffset)
+    {
+        if (_scrollCorrelationId is not ScrollView.NoCorrelationId)
+            return;
+
+        _ = BeginScrollOperation(
+            startingOffset,
+            targetOffset,
+            isAnimated: false,
+            ScrollChangeSource.User);
+    }
+
+    private void EnsureUserZoomOperation(double startingZoomFactor, double targetZoomFactor)
+    {
+        if (_zoomCorrelationId is not ScrollView.NoCorrelationId)
+            return;
+
+        var center = new Point(Viewport.Width * 0.5, Viewport.Height * 0.5);
+        _ = BeginZoomOperation(
+            startingZoomFactor,
+            targetZoomFactor,
+            center,
+            isAnimated: false,
+            ScrollChangeSource.User);
+    }
+
+    private void CompleteScrollOperation(ScrollingOperationResult result)
+    {
+        var correlationId = _scrollCorrelationId;
+        _scrollCorrelationId = ScrollView.NoCorrelationId;
+        _scrollRequestId = null;
+        _scrollRequestAnimated = false;
+        _scrollViewOwner?.CompleteScrollOperation(correlationId, result);
+    }
+
+    private void CompleteZoomOperation(ScrollingOperationResult result)
+    {
+        var correlationId = _zoomCorrelationId;
+        _zoomCorrelationId = ScrollView.NoCorrelationId;
+        _zoomRequestId = null;
+        _zoomRequestAnimated = false;
+        _scrollViewOwner?.CompleteZoomOperation(correlationId, result);
+    }
+
+    private void InterruptOperations()
+    {
+        CompleteScrollOperation(ScrollingOperationResult.Interrupted);
+        CompleteZoomOperation(ScrollingOperationResult.Interrupted);
+    }
+
+    private void InterruptOperationsForTrackerRequest()
+    {
+        if (HasActiveTrackerRequest
+            || _interactionState is ScrollingInteractionState.Inertia or ScrollingInteractionState.Animation)
+            InterruptOperations();
+    }
+
+    private void SetInteractionState(ScrollingInteractionState state)
+    {
+        _interactionState = state;
+        _scrollViewOwner?.UpdateInteractionState(state);
     }
 
 
@@ -1883,26 +2104,49 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// </summary>
     /// <param name="offset">The requested logical offset.</param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>
+    /// The attached <see cref="ScrollView"/> operation identifier, or <see cref="ScrollView.NoCorrelationId"/>
+    /// when no ScrollView operation is created.
+    /// </returns>
     /// <remarks>
     /// Public calls are reported to an attached <see cref="ScrollView"/> as
     /// <see cref="ScrollChangeSource.Programmatic"/> changes.
     /// </remarks>
-    public void ScrollTo(Vector offset, bool isAnimated = false) =>
+    public int ScrollTo(Vector offset, bool isAnimated = false) =>
         ScrollTo(offset, isAnimated, ScrollChangeSource.Programmatic);
 
-    internal void ScrollTo(
+    internal int ScrollTo(
         Vector offset,
         bool isAnimated,
-        ScrollChangeSource source)
+        ScrollChangeSource source,
+        Vector? startingOffset = null)
     {
-        _changeSource = source;
         offset = ClampOffsetToEnabledAxes(offset);
+        if (Offset.NearlyEquals(offset) || _interactionState is ScrollingInteractionState.Interaction)
+            return ScrollView.NoCorrelationId;
+
+        var completeOnIdle = HasActiveTrackerRequest
+                             || _interactionState is ScrollingInteractionState.Inertia or ScrollingInteractionState.Animation;
+        InterruptOperationsForTrackerRequest();
+        var correlationId = BeginScrollOperation(
+            startingOffset ?? Offset,
+            offset,
+            isAnimated,
+            source,
+            completeOnIdle);
+        if (_scrollViewOwner is { } owner && !owner.IsScrollOperationActive(correlationId))
+            return correlationId;
+
+        _changeSource = source;
 
         if (_interactionTracker is null || GetCompositionVisual() is not { } visual)
         {
             SetCurrentValue(OffsetProperty, offset);
             SynchronizeScrollViewOwner(source);
-            return;
+            Dispatcher.UIThread.Post(
+                () => CompleteScrollOperation(ScrollingOperationResult.Completed),
+                DispatcherPriority.Render);
+            return correlationId;
         }
 
         var trackerPosition = ToTrackerPosition(offset, CalculateScrollableArea(ZoomFactor));
@@ -1914,12 +2158,16 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             var animation = visual.Compositor.CreateVector3DKeyFrameAnimation();
             animation.Duration = TimeSpan.FromMilliseconds(300);
             animation.InsertKeyFrame(1, position, new CircularEaseOut());
-            _requestId = _interactionTracker.TryUpdatePositionWithAnimation(animation);
+            _scrollRequestId = _interactionTracker.TryUpdatePositionWithAnimation(animation);
         }
         else
         {
-            _requestId = _interactionTracker.TryUpdatePosition(position);
+            _scrollRequestId = _interactionTracker.TryUpdatePosition(position);
+            InvalidateArrange();
         }
+
+        _requestId = _scrollRequestId;
+        return correlationId;
     }
 
     private Vector ClampOffsetToEnabledAxes(Vector offset)
@@ -1945,7 +2193,8 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// </summary>
     /// <param name="zoomFactorDelta">The amount added to the current zoom factor.</param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
-    public void ZoomBy(double zoomFactorDelta, bool isAnimated = true) =>
+    /// <returns>The attached <see cref="ScrollView"/> operation identifier, or <see cref="ScrollView.NoCorrelationId"/>.</returns>
+    public int ZoomBy(double zoomFactorDelta, bool isAnimated = true) =>
         ZoomBy(zoomFactorDelta, centerPoint: null, isAnimated: isAnimated);
 
     /// <summary>
@@ -1956,14 +2205,15 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// The viewport-relative point that remains visually stationary, or <see langword="null"/> to use the viewport center.
     /// </param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>The attached <see cref="ScrollView"/> operation identifier, or <see cref="ScrollView.NoCorrelationId"/>.</returns>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="centerPoint"/> contains a non-finite coordinate.
     /// </exception>
-    public void ZoomBy(double zoomFactorDelta, Point? centerPoint, bool isAnimated = true)
+    public int ZoomBy(double zoomFactorDelta, Point? centerPoint, bool isAnimated = true)
     {
         ValidateZoomCenter(centerPoint);
         var currentScale = _interactionTracker?.Scale ?? ZoomFactor;
-        ZoomTo(
+        return ZoomTo(
             currentScale + zoomFactorDelta,
             centerPoint,
             isAnimated);
@@ -1974,11 +2224,12 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// </summary>
     /// <param name="zoomFactor">The requested zoom factor.</param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>The attached <see cref="ScrollView"/> operation identifier, or <see cref="ScrollView.NoCorrelationId"/>.</returns>
     /// <remarks>
     /// Public calls are reported to an attached <see cref="ScrollView"/> as
     /// <see cref="ScrollChangeSource.Programmatic"/> changes.
     /// </remarks>
-    public void ZoomTo(double zoomFactor, bool isAnimated = true) =>
+    public int ZoomTo(double zoomFactor, bool isAnimated = true) =>
         ZoomTo(
             zoomFactor,
             centerPoint: null,
@@ -1993,17 +2244,18 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// The viewport-relative point that remains visually stationary, or <see langword="null"/> to use the viewport center.
     /// </param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>The attached <see cref="ScrollView"/> operation identifier, or <see cref="ScrollView.NoCorrelationId"/>.</returns>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="centerPoint"/> contains a non-finite coordinate.
     /// </exception>
-    public void ZoomTo(double zoomFactor, Point? centerPoint, bool isAnimated = true) =>
+    public int ZoomTo(double zoomFactor, Point? centerPoint, bool isAnimated = true) =>
         ZoomTo(
             zoomFactor,
             centerPoint,
             isAnimated,
             source: ScrollChangeSource.Programmatic);
 
-    internal void ZoomTo(
+    internal int ZoomTo(
         double zoomFactor,
         Point? centerPoint,
         bool isAnimated,
@@ -2013,6 +2265,25 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
         var minimumScale = _interactionTracker?.MinScale ?? MinZoomFactor;
         var maximumScale = _interactionTracker?.MaxScale ?? MaxZoomFactor;
         var newScale = Math.Clamp(zoomFactor, minimumScale, maximumScale);
+        var currentScale = _interactionTracker?.Scale ?? ZoomFactor;
+        if (MathUtilities.AreClose(currentScale, newScale)
+            || _interactionState is ScrollingInteractionState.Interaction)
+            return ScrollView.NoCorrelationId;
+
+        var resolvedCenterPoint = centerPoint ?? new Point(Viewport.Width * 0.5, Viewport.Height * 0.5);
+        var completeOnIdle = HasActiveTrackerRequest
+                             || _interactionState is ScrollingInteractionState.Inertia or ScrollingInteractionState.Animation;
+        InterruptOperationsForTrackerRequest();
+        var correlationId = BeginZoomOperation(
+            currentScale,
+            newScale,
+            resolvedCenterPoint,
+            isAnimated,
+            source,
+            completeOnIdle);
+        if (_scrollViewOwner is { } owner && !owner.IsZoomOperationActive(correlationId))
+            return correlationId;
+
         var visual = GetCompositionVisual();
         if (_interactionTracker is null || visual is null)
         {
@@ -2027,10 +2298,13 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             }
 
             SynchronizeScrollViewOwner(source);
-            return;
+            Dispatcher.UIThread.Post(
+                () => CompleteZoomOperation(ScrollingOperationResult.Completed),
+                DispatcherPriority.Render);
+            return correlationId;
         }
 
-        var zoomCenter = ResolveZoomCenter(centerPoint);
+        var zoomCenter = new Vector3D(resolvedCenterPoint.X, resolvedCenterPoint.Y, 0);
         _changeSource = source;
 
         if (isAnimated)
@@ -2039,18 +2313,15 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
             var animation = compositor.CreateDoubleKeyFrameAnimation();
             animation.Duration = TimeSpan.FromMilliseconds(300);
             animation.InsertKeyFrame(1.0f, newScale, new CircularEaseOut());
-            _requestId = _interactionTracker.TryUpdateScaleWithAnimation(animation, zoomCenter);
+            _zoomRequestId = _interactionTracker.TryUpdateScaleWithAnimation(animation, zoomCenter);
         }
         else
         {
-            _requestId = _interactionTracker.TryUpdateScale(newScale, zoomCenter);
+            _zoomRequestId = _interactionTracker.TryUpdateScale(newScale, zoomCenter);
         }
-    }
 
-    private Vector3D ResolveZoomCenter(Point? centerPoint)
-    {
-        var point = centerPoint ?? new Point(Viewport.Width * 0.5, Viewport.Height * 0.5);
-        return new Vector3D(point.X, point.Y, 0);
+        _requestId = _zoomRequestId;
+        return correlationId;
     }
 
     internal static void ValidateZoomCenter(Point? centerPoint)

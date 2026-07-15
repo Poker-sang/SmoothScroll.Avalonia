@@ -21,7 +21,7 @@ namespace SmoothScroll.Avalonia.Controls;
 [TemplatePart("PART_ContentPresenter", typeof(ScrollPresenter))]
 [TemplatePart("PART_HorizontalScrollBar", typeof(ScrollBar))]
 [TemplatePart("PART_VerticalScrollBar", typeof(ScrollBar))]
-public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvider
+public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnchorProvider
 {
     private const double ScrollBarSmallChange = 16;
 
@@ -299,7 +299,6 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     private Vector _notifiedOffset;
     private Size _notifiedViewport;
     private bool _updatingFromPresenter;
-    private ScrollChangeSource? _pendingOffsetSource;
 
     /// <summary>
     /// Occurs when the presenter needs to select a new element anchor during layout.
@@ -363,7 +362,8 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// </summary>
     /// <remarks>
     /// Values are coerced to finite, non-negative coordinates within <see cref="ScrollBarMaximum"/>.
-    /// Setting this property is reported as a programmatic change through <see cref="ScrollChanged"/>.
+    /// Setting this property creates an immediate programmatic operation and is reported through
+    /// <see cref="ScrollStarting"/>, <see cref="ScrollChanged"/>, and <see cref="ScrollCompleted"/>.
     /// </remarks>
     public Vector Offset
     {
@@ -575,12 +575,13 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// <remarks>
     /// Setting this property immediately applies a programmatic zoom around the viewport center. The value is
     /// constrained to <see cref="MinZoomFactor"/> and <see cref="MaxZoomFactor"/>. Use
-    /// <see cref="ZoomTo(double, bool)"/> to request an animated zoom.
+    /// <see cref="ZoomTo(double, bool)"/> to request an animated zoom. A changed value creates a lifecycle
+    /// reported through <see cref="ZoomStarting"/>, <see cref="ZoomChanged"/>, and <see cref="ZoomCompleted"/>.
     /// </remarks>
     public double ZoomFactor
     {
         get => _zoomFactor;
-        set => SetAndRaise(ZoomFactorProperty, ref _zoomFactor, CoerceZoomFactor(value));
+        set => SetZoomFactor(value, ScrollChangeSource.Programmatic);
     }
 
     /// <summary>
@@ -793,17 +794,21 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// </summary>
     /// <param name="offset">The requested zero-based horizontal and vertical offset.</param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition when a presenter is available.</param>
+    /// <returns>
+    /// A positive identifier shared by the operation events, or <see cref="NoCorrelationId"/> when the
+    /// coerced offset is unchanged or direct manipulation currently owns the tracker.
+    /// </returns>
     /// <remarks>
     /// The requested value is constrained by the enabled axes and <see cref="ScrollBarMaximum"/>. Changes
     /// made through this method are reported as <see cref="ScrollChangeSource.Programmatic"/>.
     /// </remarks>
-    public void ScrollTo(Vector offset, bool isAnimated = true)
+    public int ScrollTo(Vector offset, bool isAnimated = true)
     {
         offset = ClampOffsetToEnabledAxes(offset);
         if (_presenter is { } presenter)
-            presenter.ScrollTo(offset, isAnimated, ScrollChangeSource.Programmatic);
-        else
-            SetOffset(offset, ScrollChangeSource.Programmatic);
+            return presenter.ScrollTo(offset, isAnimated, ScrollChangeSource.Programmatic);
+
+        return SetOffset(offset, ScrollChangeSource.Programmatic);
     }
 
     /// <summary>
@@ -811,11 +816,15 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// </summary>
     /// <param name="offsetDelta">The horizontal and vertical offset increments.</param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition when a presenter is available.</param>
+    /// <returns>
+    /// A positive identifier shared by the operation events, or <see cref="NoCorrelationId"/> when no
+    /// operation is created.
+    /// </returns>
     /// <remarks>
     /// The final offset is constrained by the enabled axes and <see cref="ScrollBarMaximum"/>. Changes made
     /// through this method are reported as <see cref="ScrollChangeSource.Programmatic"/>.
     /// </remarks>
-    public void ScrollBy(Vector offsetDelta, bool isAnimated = true) =>
+    public int ScrollBy(Vector offsetDelta, bool isAnimated = true) =>
         ScrollTo(Offset + offsetDelta, isAnimated);
 
     /// <summary>
@@ -823,12 +832,16 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// </summary>
     /// <param name="zoomFactor">The requested scale, constrained to <see cref="MinZoomFactor"/> and <see cref="MaxZoomFactor"/>.</param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>
+    /// A positive identifier shared by the operation events, or <see cref="NoCorrelationId"/> when no
+    /// operation is created.
+    /// </returns>
     /// <remarks>
     /// This method is programmatic and can be used even when <see cref="IsZoomEnabled"/> is
     /// <see langword="false"/>. Before the control template is applied, the requested factor is retained
     /// and applied without animation when a presenter becomes available.
     /// </remarks>
-    public void ZoomTo(double zoomFactor, bool isAnimated = true) =>
+    public int ZoomTo(double zoomFactor, bool isAnimated = true) =>
         ZoomTo(zoomFactor, centerPoint: null, isAnimated: isAnimated);
 
     /// <summary>
@@ -839,6 +852,10 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// The viewport-relative point that remains visually stationary, or <see langword="null"/> to use the viewport center.
     /// </param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>
+    /// A positive identifier shared by the operation events, or <see cref="NoCorrelationId"/> when no
+    /// operation is created.
+    /// </returns>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="centerPoint"/> contains a non-finite coordinate.
     /// </exception>
@@ -847,17 +864,14 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// <see langword="false"/>. Before the control template is applied, the requested factor is retained;
     /// the center point cannot affect the offset until a presenter is available.
     /// </remarks>
-    public void ZoomTo(double zoomFactor, Point? centerPoint, bool isAnimated = true)
+    public int ZoomTo(double zoomFactor, Point? centerPoint, bool isAnimated = true)
     {
         ValidateZoomCenter(centerPoint);
 
         if (_presenter is null)
-        {
-            ZoomFactor = zoomFactor;
-            return;
-        }
+            return SetZoomFactor(zoomFactor, ScrollChangeSource.Programmatic);
 
-        _presenter.ZoomTo(
+        return _presenter.ZoomTo(
             zoomFactor,
             centerPoint,
             isAnimated,
@@ -869,8 +883,12 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// </summary>
     /// <param name="zoomFactorDelta">The amount added to the current <see cref="ZoomFactor"/>.</param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>
+    /// A positive identifier shared by the operation events, or <see cref="NoCorrelationId"/> when no
+    /// operation is created.
+    /// </returns>
     /// <inheritdoc cref="ZoomTo(double, bool)"/>
-    public void ZoomBy(double zoomFactorDelta, bool isAnimated = true) =>
+    public int ZoomBy(double zoomFactorDelta, bool isAnimated = true) =>
         ZoomBy(zoomFactorDelta, centerPoint: null, isAnimated: isAnimated);
 
     /// <summary>
@@ -881,21 +899,22 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     /// The viewport-relative point that remains visually stationary, or <see langword="null"/> to use the viewport center.
     /// </param>
     /// <param name="isAnimated"><see langword="true"/> to animate the transition.</param>
+    /// <returns>
+    /// A positive identifier shared by the operation events, or <see cref="NoCorrelationId"/> when no
+    /// operation is created.
+    /// </returns>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="centerPoint"/> contains a non-finite coordinate.
     /// </exception>
     /// <inheritdoc cref="ZoomTo(double, Point?, bool)"/>
-    public void ZoomBy(double zoomFactorDelta, Point? centerPoint, bool isAnimated = true)
+    public int ZoomBy(double zoomFactorDelta, Point? centerPoint, bool isAnimated = true)
     {
         ValidateZoomCenter(centerPoint);
 
         if (_presenter is null)
-        {
-            ZoomFactor += zoomFactorDelta;
-            return;
-        }
+            return SetZoomFactor(ZoomFactor + zoomFactorDelta, ScrollChangeSource.Programmatic);
 
-        _presenter.ZoomBy(zoomFactorDelta, centerPoint, isAnimated);
+        return _presenter.ZoomBy(zoomFactorDelta, centerPoint, isAnimated);
     }
 
     /// <summary>
@@ -970,24 +989,50 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
 
             if (!_updatingFromPresenter)
             {
-                // Consume the source before raising ScrollChanged. A property write performed by
-                // an event handler is a new programmatic request, not part of the outer user input.
-                var source = _pendingOffsetSource ?? ScrollChangeSource.Programmatic;
-                _pendingOffsetSource = null;
-                _presenter?.SetOffsetFromOwner(change.GetNewValue<Vector>(), source);
+                var context = _offsetChangeContext;
+                _offsetChangeContext = null;
+                var source = context?.Source ?? ScrollChangeSource.Programmatic;
+                var correlationId = _presenter?.SetOffsetFromOwner(
+                    change.GetOldValue<Vector>(),
+                    change.GetNewValue<Vector>(),
+                    source)
+                    ?? BeginScrollOperation(
+                        change.GetOldValue<Vector>(),
+                        change.GetNewValue<Vector>(),
+                        isAnimated: false,
+                        source);
+                if (context is not null)
+                    context.CorrelationId = correlationId;
+
                 RaiseScrollChanged(source);
+                if (_presenter is null)
+                    CompleteScrollOperation(correlationId, ScrollingOperationResult.Completed);
             }
         }
         else if (change.Property == ZoomFactorProperty)
         {
             if (!_updatingFromPresenter)
             {
-                _presenter?.ZoomTo(
+                var context = _zoomChangeContext;
+                _zoomChangeContext = null;
+                var source = context?.Source ?? ScrollChangeSource.Programmatic;
+                var correlationId = _presenter?.ZoomTo(
                     change.GetNewValue<double>(),
                     centerPoint: null,
                     isAnimated: false,
-                    source: ScrollChangeSource.Programmatic);
-                RaiseZoomChanged(ScrollChangeSource.Programmatic);
+                    source)
+                    ?? BeginZoomOperation(
+                        change.GetOldValue<double>(),
+                        change.GetNewValue<double>(),
+                        centerPoint: null,
+                        isAnimated: false,
+                        source);
+                if (context is not null)
+                    context.CorrelationId = correlationId;
+
+                RaiseZoomChanged(source);
+                if (_presenter is null)
+                    CompleteZoomOperation(correlationId, ScrollingOperationResult.Completed);
             }
         }
         else if (change.Property == GestureBindingsProperty || IsInteractionConfigurationProperty(change.Property))
@@ -1055,16 +1100,44 @@ public sealed class ScrollView : ContentControl, IScrollable, IScrollAnchorProvi
     private void ScrollByUserInput(Vector offsetDelta) =>
         SetOffset(Offset + offsetDelta, ScrollChangeSource.User);
 
-    private void SetOffset(Vector offset, ScrollChangeSource source)
+    private int SetOffset(Vector offset, ScrollChangeSource source)
     {
+        offset = CoerceOffset(this, offset);
+        if (Offset.NearlyEquals(offset) || State is ScrollingInteractionState.Interaction)
+            return NoCorrelationId;
+
+        var context = new OperationRequestContext(source);
+        var previousContext = _offsetChangeContext;
         try
         {
-            _pendingOffsetSource = source;
+            _offsetChangeContext = context;
             SetCurrentValue(OffsetProperty, offset);
+            return context.CorrelationId;
         }
         finally
         {
-            _pendingOffsetSource = null;
+            _offsetChangeContext = previousContext;
+        }
+    }
+
+    private int SetZoomFactor(double zoomFactor, ScrollChangeSource source)
+    {
+        zoomFactor = CoerceZoomFactor(zoomFactor);
+        if (MathUtilities.AreClose(ZoomFactor, zoomFactor)
+            || State is ScrollingInteractionState.Interaction)
+            return NoCorrelationId;
+
+        var context = new OperationRequestContext(source);
+        var previousContext = _zoomChangeContext;
+        try
+        {
+            _zoomChangeContext = context;
+            SetAndRaise(ZoomFactorProperty, ref _zoomFactor, zoomFactor);
+            return context.CorrelationId;
+        }
+        finally
+        {
+            _zoomChangeContext = previousContext;
         }
     }
 

@@ -118,6 +118,9 @@ internal sealed class IdleState : InteractionTrackerState
         _interactionTracker.SetPosition(value, requestId);
     }
 
+    internal override void TryUpdateScale(double scale, Vector3D centerPoint, int requestId) =>
+        _interactionTracker.SetScale(scale, centerPoint, requestId);
+
     internal override void ReceiveBoundsUpdate()
     {
         var position = _interactionTracker.Position;

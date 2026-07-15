@@ -62,12 +62,17 @@ public partial class PlaygroundPage : ContentPage
     private bool _synchronizingGestureEditors;
     private bool _synchronizingAnchorControls = true;
     private int _anchorRequestCount;
+    private int _lastOperationCorrelationId = ScrollView.NoCorrelationId;
 
     public PlaygroundPage()
     {
         InitializeComponent();
         PlaygroundScrollView.AnchorRequested += PlaygroundScrollView_OnAnchorRequested;
+        PlaygroundScrollView.ScrollStarting += PlaygroundScrollView_OnScrollStarting;
+        PlaygroundScrollView.ScrollCompleted += PlaygroundScrollView_OnScrollCompleted;
         PlaygroundScrollView.ScrollChanged += PlaygroundScrollView_OnScrollChanged;
+        PlaygroundScrollView.ZoomStarting += PlaygroundScrollView_OnZoomStarting;
+        PlaygroundScrollView.ZoomCompleted += PlaygroundScrollView_OnZoomCompleted;
         PlaygroundScrollView.Loaded += PlaygroundScrollView_OnLoaded;
         LoadGestureEditors(PlaygroundScrollView.GestureBindings);
         SynchronizeSliders();
@@ -125,6 +130,30 @@ public partial class PlaygroundPage : ContentPage
         LastChangeSourceText.Text = e.ChangeSource.ToString();
         SynchronizeSliders();
         UpdateCurrentAnchorState();
+    }
+
+    private void PlaygroundScrollView_OnScrollStarting(object? sender, ScrollingScrollStartingEventArgs e)
+    {
+        _lastOperationCorrelationId = e.CorrelationId;
+        LastOperationText.Text = $"Scroll #{e.CorrelationId}: Running";
+    }
+
+    private void PlaygroundScrollView_OnScrollCompleted(object? sender, ScrollingScrollCompletedEventArgs e)
+    {
+        if (e.CorrelationId == _lastOperationCorrelationId)
+            LastOperationText.Text = $"Scroll #{e.CorrelationId}: {e.Result}";
+    }
+
+    private void PlaygroundScrollView_OnZoomStarting(object? sender, ScrollingZoomStartingEventArgs e)
+    {
+        _lastOperationCorrelationId = e.CorrelationId;
+        LastOperationText.Text = $"Zoom #{e.CorrelationId}: Running";
+    }
+
+    private void PlaygroundScrollView_OnZoomCompleted(object? sender, ScrollingZoomCompletedEventArgs e)
+    {
+        if (e.CorrelationId == _lastOperationCorrelationId)
+            LastOperationText.Text = $"Zoom #{e.CorrelationId}: {e.Result}";
     }
 
     private void SynchronizeSliders()

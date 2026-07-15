@@ -224,6 +224,11 @@ internal sealed class InteractingState : InteractionTrackerState
         _interactionTracker.NotifyRequestIgnored(requestId);
     }
 
+    internal override void TryUpdateScale(double scale, Vector3D centerPoint, int requestId)
+    {
+        _interactionTracker.NotifyRequestIgnored(requestId);
+    }
+
     internal override void ReceiveBoundsUpdate()
     {
         SyncPositionFromTracker();

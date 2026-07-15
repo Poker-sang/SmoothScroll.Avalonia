@@ -114,6 +114,13 @@ internal sealed class InertiaState : InteractionTrackerState
         _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId));
     }
 
+    internal override void TryUpdateScale(double scale, Vector3D centerPoint, int requestId)
+    {
+        _handler.Stop();
+        _interactionTracker.SetScale(scale, centerPoint, requestId);
+        _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId));
+    }
+
     internal override void StartAnimation(
         CompositionAnimation animation,
         int requestId,

@@ -157,6 +157,13 @@ internal sealed class CustomAnimationState : InteractionTrackerState
         _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId));
     }
 
+    internal override void TryUpdateScale(double scale, Vector3D centerPoint, int requestId)
+    {
+        _animationHandler.Stop();
+        _interactionTracker.SetScale(scale, centerPoint, requestId);
+        _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId));
+    }
+
     internal override void ReceiveBoundsUpdate()
     {
     }
