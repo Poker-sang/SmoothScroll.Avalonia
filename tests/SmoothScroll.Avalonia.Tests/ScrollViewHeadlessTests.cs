@@ -1114,6 +1114,208 @@ public sealed class ScrollViewHeadlessTests
     }
 
     [AvaloniaFact]
+    public void TouchDragStartsWhenChildHandlesPointerPressed()
+    {
+        using var host = new ScrollViewHost(
+            new Size(600, 300),
+            new Size(600, 900),
+            view =>
+            {
+                view.HorizontalScrollMode = ScrollMode.Disabled;
+                view.VerticalScrollMode = ScrollMode.Enabled;
+                view.IsScrollInertiaEnabled = false;
+            });
+        var button = new Button { Width = 600, Height = 900 };
+        host.View.Content = button;
+        _ = host.Render();
+        using var touch = new TouchContact(host.Window, isPrimary: true);
+
+        touch.Press(new Point(300, 200));
+        touch.Move(new Point(300, 170));
+        touch.Move(new Point(300, 80));
+        _ = host.Render();
+
+        Assert.True(
+            host.View.Offset.Y > 0,
+            $"Touch drag was intercepted by {host.Window.InputHitTest(new Point(300, 200))?.GetType().Name}.");
+    }
+
+    [AvaloniaFact]
+    public void TouchTapOnHandledChildStillClicksWithoutScrolling()
+    {
+        using var host = new ScrollViewHost(
+            new Size(600, 300),
+            new Size(600, 900),
+            view =>
+            {
+                view.HorizontalScrollMode = ScrollMode.Disabled;
+                view.VerticalScrollMode = ScrollMode.Enabled;
+                view.IsScrollInertiaEnabled = false;
+            });
+        var clickCount = 0;
+        var button = new Button { Width = 600, Height = 900 };
+        button.Click += (_, _) => clickCount++;
+        host.View.Content = button;
+        _ = host.Render();
+        using var touch = new TouchContact(host.Window, isPrimary: true);
+
+        touch.Press(new Point(300, 200));
+        touch.Release(new Point(300, 200));
+        _ = host.Render();
+
+        Assert.Equal(1, clickCount);
+        Assert.Equal(0, host.View.Offset.Y, 3);
+    }
+
+    [AvaloniaFact]
+    public void TouchDragStartsOnExpanderHeader()
+    {
+        using var host = new ScrollViewHost(
+            new Size(600, 300),
+            new Size(600, 900),
+            view =>
+            {
+                view.HorizontalScrollMode = ScrollMode.Disabled;
+                view.VerticalScrollMode = ScrollMode.Enabled;
+                view.IsScrollInertiaEnabled = false;
+            });
+        var expander = new Expander
+        {
+            Width = 600,
+            Height = 900,
+            Header = "Settings",
+            IsExpanded = true,
+            Content = new Border { Height = 800 }
+        };
+        host.View.Content = expander;
+        _ = host.Render();
+        using var touch = new TouchContact(host.Window, isPrimary: true);
+
+        touch.Press(new Point(300, 20));
+        touch.Move(new Point(300, -10));
+        touch.Move(new Point(300, -100));
+        _ = host.Render();
+
+        Assert.True(host.View.Offset.Y > 0);
+    }
+
+    [AvaloniaFact]
+    public void TouchManipulationStaysWithScrollableDescendantBeforeBoundary()
+    {
+        var innerView = new ScrollView
+        {
+            Width = 600,
+            Height = 300,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            VerticalScrollMode = ScrollMode.Enabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            IsScrollInertiaEnabled = false,
+            Content = new Button { Width = 600, Height = 900 }
+        };
+        var outerContent = new StackPanel { Width = 600 };
+        outerContent.Children.Add(innerView);
+        outerContent.Children.Add(new Border { Height = 500 });
+        var outerView = new ScrollView
+        {
+            Width = 600,
+            Height = 500,
+            HorizontalScrollMode = ScrollMode.Disabled,
+            VerticalScrollMode = ScrollMode.Enabled,
+            HorizontalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            IsScrollInertiaEnabled = false,
+            Content = outerContent
+        };
+        var window = new Window
+        {
+            Width = 600,
+            Height = 500,
+            WindowDecorations = WindowDecorations.None,
+            Content = outerView
+        };
+
+        try
+        {
+            window.Show();
+            for (var i = 0; i < 4; i++)
+                _ = window.CaptureRenderedFrame();
+            using var touch = new TouchContact(window, isPrimary: true);
+
+            touch.Press(new Point(300, 200));
+            touch.Move(new Point(300, 170));
+            touch.Move(new Point(300, 80));
+            _ = window.CaptureRenderedFrame();
+
+            Assert.True(
+                innerView.Offset.Y > 0 && Math.Abs(outerView.Offset.Y) < 0.001,
+                $"Expected the inner view to consume the touch. Inner={innerView.Offset}, Outer={outerView.Offset}, "
+                + $"Hit={window.InputHitTest(new Point(300, 200))?.GetType().Name}.");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void TouchPinchStaysWithZoomableDescendant()
+    {
+        var innerView = new ScrollView
+        {
+            Width = 600,
+            Height = 300,
+            IsZoomEnabled = true,
+            IsScrollInertiaEnabled = false,
+            HorizontalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            Content = new Border { Width = 1200, Height = 900 }
+        };
+        var outerContent = new StackPanel { Width = 600 };
+        outerContent.Children.Add(innerView);
+        outerContent.Children.Add(new Border { Height = 500 });
+        var outerView = new ScrollView
+        {
+            Width = 600,
+            Height = 500,
+            IsZoomEnabled = true,
+            IsScrollInertiaEnabled = false,
+            HorizontalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            Content = outerContent
+        };
+        var window = new Window
+        {
+            Width = 600,
+            Height = 500,
+            WindowDecorations = WindowDecorations.None,
+            Content = outerView
+        };
+
+        try
+        {
+            window.Show();
+            for (var i = 0; i < 4; i++)
+                _ = window.CaptureRenderedFrame();
+            using var first = new TouchContact(window, isPrimary: true);
+            using var second = new TouchContact(window, isPrimary: false);
+
+            first.Press(new Point(250, 150));
+            second.Press(new Point(350, 150));
+            first.Move(new Point(200, 150));
+            second.Move(new Point(400, 150));
+            _ = window.CaptureRenderedFrame();
+
+            Assert.True(innerView.ZoomFactor > 1);
+            Assert.Equal(1, outerView.ZoomFactor, 3);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void TouchManipulationTransfersToAncestorAtBoundary()
     {
         var innerContent = new Border

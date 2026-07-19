@@ -304,7 +304,7 @@ private void ScrollViewOnScrollChanged(object? sender, ScrollViewChangedEventArg
 | ----------------- | --------- | ------------------ |
 | `TouchDrag`       | 无        | `Pan`              |
 | `TouchPinch`      | 无        | `Zoom`             |
-| `MouseLeftDrag`   | 无        | `Pan`              |
+| `MouseLeftDrag`   | 无        | `None`             |
 | `MouseMiddleDrag` | 无        | `Pan`              |
 | `MouseRightDrag`  | 无        | 无操作             |
 | `MouseWheel`      | 无        | `AutoScroll`       |

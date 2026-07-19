@@ -357,7 +357,7 @@ The default profile is:
 | ----------------- | --------- | ------------------ |
 | `TouchDrag`       | None      | `Pan`              |
 | `TouchPinch`      | None      | `Zoom`             |
-| `MouseLeftDrag`   | None      | `Pan`              |
+| `MouseLeftDrag`   | None      | `None`             |
 | `MouseMiddleDrag` | None      | `Pan`              |
 | `MouseRightDrag`  | None      | `None`             |
 | `MouseWheel`      | None      | `AutoScroll`       |

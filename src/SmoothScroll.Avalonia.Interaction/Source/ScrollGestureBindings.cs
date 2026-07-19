@@ -16,7 +16,7 @@ public sealed class ScrollGestureBindings : AvaloniaDictionary<ScrollGesture, Sc
     {
         [new(ScrollInputGesture.TouchDrag)] = ScrollGestureAction.Pan,
         [new(ScrollInputGesture.TouchPinch)] = ScrollGestureAction.Zoom,
-        [new(ScrollInputGesture.MouseLeftDrag)] = ScrollGestureAction.Pan,
+        [new(ScrollInputGesture.MouseLeftDrag)] = ScrollGestureAction.None,
         [new(ScrollInputGesture.MouseMiddleDrag)] = ScrollGestureAction.Pan,
         [new(ScrollInputGesture.MouseRightDrag)] = ScrollGestureAction.None,
         [new(ScrollInputGesture.MouseWheel)] = ScrollGestureAction.AutoScroll,

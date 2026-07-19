@@ -57,9 +57,23 @@ public sealed class InputElementInteractionSource : IDisposable
     {
         _inputElement = inputElement;
         _tracker = tracker;
-        _inputElement.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Bubble);
-        _inputElement.AddHandler(InputElement.PointerMovedEvent, OnPointerMoved, RoutingStrategies.Bubble);
-        _inputElement.AddHandler(InputElement.PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Bubble);
+        // Button-like descendants handle their own press/release events. Observe those events
+        // without preventing a later drag from promoting to a scroll interaction.
+        _inputElement.AddHandler(
+            InputElement.PointerPressedEvent,
+            OnPointerPressed,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        _inputElement.AddHandler(
+            InputElement.PointerMovedEvent,
+            OnPointerMoved,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
+        _inputElement.AddHandler(
+            InputElement.PointerReleasedEvent,
+            OnPointerReleased,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
         _inputElement.PointerCaptureLost += OnPointerCaptureLost;
         _inputElement.PointerWheelChanged += OnPointerWheelChanged;
 
@@ -229,6 +243,10 @@ public sealed class InputElementInteractionSource : IDisposable
 
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        // A descendant scroll source has already won the gesture; keep nested scrolling exclusive.
+        if (e.Handled && IsClaimedByDescendantScrollable(e.Pointer))
+            return;
+
         UpdateChainingTarget();
         if (!TryGetPressedAction(e, out var action))
             return;
@@ -294,6 +312,10 @@ public sealed class InputElementInteractionSource : IDisposable
 
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
+        // A descendant scroll source has already won the gesture; keep nested scrolling exclusive.
+        if (e.Handled && IsClaimedByDescendantScrollable(e.Pointer))
+            return;
+
         var position = e.GetPosition(_inputElement);
 
         if (_secondContact is not null)
@@ -734,6 +756,13 @@ public sealed class InputElementInteractionSource : IDisposable
         pointer.Captured is Visual captured
         && _inputElement is Visual input
         && (ReferenceEquals(captured, input) || input.IsVisualAncestorOf(captured));
+
+    private bool IsClaimedByDescendantScrollable(IPointer pointer) =>
+        pointer.Captured is Visual captured
+        && captured is IScrollable
+        && _inputElement is Visual input
+        && !ReferenceEquals(captured, input)
+        && input.IsVisualAncestorOf(captured);
 
     public void Dispose()
     {
