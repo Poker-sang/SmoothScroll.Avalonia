@@ -1,6 +1,4 @@
 using Avalonia;
-using Avalonia.Animation;
-using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Animations;
 using Avalonia.Rendering.Composition.Expressions;
 using Avalonia.Rendering.Composition.Server;

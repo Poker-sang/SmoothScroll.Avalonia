@@ -1,10 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Numerics;
-using System.Xml.Linq;
+﻿using System.Numerics;
 using Avalonia;
-using Avalonia.Animation;
 using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
@@ -19,7 +14,6 @@ using Avalonia.Threading;
 using Avalonia.Utilities;
 using Avalonia.VisualTree;
 using PropertyGenerator.Avalonia;
-using SmoothScroll.Avalonia.Controls.Easings;
 using SmoothScroll.Avalonia.Interaction;
 using Vector = Avalonia.Vector;
 

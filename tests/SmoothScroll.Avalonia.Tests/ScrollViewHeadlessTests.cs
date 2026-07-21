@@ -35,6 +35,33 @@ public sealed class ScrollViewHeadlessTests
     }
 
     [AvaloniaFact]
+    public void ZoomingOverflowContentToUnderflowCentersWithoutPointerInput()
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(1000, 1200),
+            view =>
+            {
+                view.IsZoomEnabled = true;
+                view.IsScrollInertiaEnabled = false;
+            },
+            renderInitially: false);
+        ScrollingZoomCompletedEventArgs? zoomCompleted = null;
+        host.View.ZoomCompleted += (_, args) => zoomCompleted = args;
+
+        var zoomId = host.View.ZoomTo(0.5, isAnimated: false);
+
+        var fittedFrame = host.Render();
+        var fittedBounds = FindRedBounds(fittedFrame);
+
+        AssertCentered(fittedBounds, fittedFrame.PixelSize);
+        AssertVectorEqual(default, host.View.Offset);
+        Assert.Equal(0.5, host.View.ZoomFactor, 3);
+        Assert.Equal(zoomId, zoomCompleted?.CorrelationId);
+        Assert.Equal(ScrollingOperationResult.Completed, zoomCompleted?.Result);
+    }
+
+    [AvaloniaFact]
     public void TemplatePropagatesInteractionConfiguration()
     {
         Assert.Null(new ScrollView().ScrollPresenter);
@@ -465,7 +492,11 @@ public sealed class ScrollViewHeadlessTests
         using var host = new ScrollViewHost(
             new Size(800, 600),
             new Size(1600, 1200),
-            view => view.IsScrollInertiaEnabled = false);
+            view =>
+            {
+                view.IsScrollInertiaEnabled = false;
+                view.GestureBindings = CreateLeftMousePanBindings();
+            });
         var states = new List<ScrollingInteractionState>();
         ScrollingScrollStartingEventArgs? starting = null;
         ScrollingScrollCompletedEventArgs? completed = null;
@@ -1428,7 +1459,11 @@ public sealed class ScrollViewHeadlessTests
         using var host = new ScrollViewHost(
             new Size(800, 600),
             new Size(1200, 900),
-            view => view.IsScrollInertiaEnabled = true);
+            view =>
+            {
+                view.IsScrollInertiaEnabled = true;
+                view.GestureBindings = CreateLeftMousePanBindings();
+            });
         var center = new Point(400, 300);
 
         host.Window.MouseDown(center, MouseButton.Left);
@@ -1600,9 +1635,20 @@ public sealed class ScrollViewHeadlessTests
         Assert.Equal(expected.Y, actual.Y, 3);
     }
 
+    private static ScrollGestureBindings CreateLeftMousePanBindings()
+    {
+        var bindings = ScrollGestureBindings.CreateDefault();
+        bindings[new ScrollGesture(ScrollInputGesture.MouseLeftDrag)] = ScrollGestureAction.Pan;
+        return bindings;
+    }
+
     private sealed class ScrollViewHost : IDisposable
     {
-        public ScrollViewHost(Size windowSize, Size contentSize, Action<ScrollView>? configure = null)
+        public ScrollViewHost(
+            Size windowSize,
+            Size contentSize,
+            Action<ScrollView>? configure = null,
+            bool renderInitially = true)
         {
             Content = new Border
             {
@@ -1630,7 +1676,8 @@ public sealed class ScrollViewHeadlessTests
                 Content = View
             };
             Window.Show();
-            _ = Render();
+            if (renderInitially)
+                _ = Render();
         }
 
         public Border Content { get; }

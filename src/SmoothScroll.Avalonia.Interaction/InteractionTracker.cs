@@ -2,10 +2,7 @@
 using Avalonia.Input;
 using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Animations;
-using Avalonia.Rendering.Composition.Expressions;
-using Avalonia.Rendering.Composition.Server;
 using Avalonia.Rendering.Composition.Transport;
-using Avalonia.Utilities;
 
 namespace SmoothScroll.Avalonia.Interaction;
 

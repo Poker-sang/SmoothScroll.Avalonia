@@ -1,10 +1,8 @@
 ﻿// Code in this file is derived from
 // https://github.com/flutter/flutter/blob/master/packages/flutter/lib/src/gestures/velocity_tracker.dart
 
-using System;
 using System.Diagnostics;
 using Avalonia;
-using Avalonia.Utilities;
 
 namespace SmoothScroll.Avalonia.Interaction.Helpers;
 // Possible enhancement: add Flutter's 'IOSScrollViewFlingVelocityTracker' and 'MacOSScrollViewFlingVelocityTracker'?

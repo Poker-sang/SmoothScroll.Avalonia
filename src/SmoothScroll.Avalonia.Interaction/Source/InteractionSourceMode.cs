@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace SmoothScroll.Avalonia.Interaction;
+﻿namespace SmoothScroll.Avalonia.Interaction;
 
 /// <summary>
 /// Provides the various definitions for how a VisualInteractionSource will process interactions.

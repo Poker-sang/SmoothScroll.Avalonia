@@ -1,10 +1,5 @@
 ﻿using System.Diagnostics;
 using Avalonia;
-using Avalonia.Input;
-using Avalonia.Rendering.Composition;
-using Avalonia.Rendering.Composition.Animations;
-using Avalonia.Rendering.Composition.Expressions;
-using Avalonia.Rendering.Composition.Server;
 using Avalonia.Rendering.Composition.Transport;
 using Avalonia.Threading;
 using Avalonia.Utilities;
@@ -16,6 +11,7 @@ internal partial class ServerInteractionTracker
     private int _count;
     private InteractionTrackerState? _state;
     private InteractionTracker? _client;
+    private readonly Queue<Action<InteractionTracker>> _pendingClientActions = [];
 
     internal double OverscrollElasticity { get; private set; } = 0.5;
 
@@ -46,6 +42,11 @@ internal partial class ServerInteractionTracker
         _client = client;
         Activate();
         _state ??= new IdleState(this, requestId: 0, isInitialIdleState: true);
+
+        // Server jobs and composition batches use separate queues, so an immediate tracker
+        // request can execute before this attachment job. Preserve those notifications in order.
+        while (_pendingClientActions.TryDequeue(out var action))
+            DispatchToClient(client, action);
     }
 
     internal void SetPosition(Vector3D newPosition, int requestId)
@@ -137,12 +138,17 @@ internal partial class ServerInteractionTracker
 
     private void PostToClient(Action<InteractionTracker> action)
     {
-        var client = _client;
-        if (client is null)
+        if (_client is not { } client)
+        {
+            _pendingClientActions.Enqueue(action);
             return;
+        }
 
-        Dispatcher.UIThread.Post(() => action(client), DispatcherPriority.Render);
+        DispatchToClient(client, action);
     }
+
+    private static void DispatchToClient(InteractionTracker client, Action<InteractionTracker> action) =>
+        Dispatcher.UIThread.Post(() => action(client), DispatcherPriority.Render);
 
     [Conditional("INTERACTION_TRACKER_TRACE")]
     private static void WriteStateTransition(int count, string previousState, string newState)

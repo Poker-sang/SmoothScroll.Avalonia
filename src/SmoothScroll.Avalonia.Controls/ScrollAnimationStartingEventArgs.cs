@@ -1,5 +1,4 @@
-﻿using System.Numerics;
-using Avalonia.Rendering.Composition.Animations;
+﻿using Avalonia.Rendering.Composition.Animations;
 using Vector = Avalonia.Vector;
 
 namespace SmoothScroll.Avalonia.Controls;

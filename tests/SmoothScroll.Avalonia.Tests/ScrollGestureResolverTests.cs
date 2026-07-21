@@ -10,7 +10,7 @@ public sealed class ScrollGestureResolverTests
     [Theory]
     [InlineData(ScrollInputGesture.TouchDrag, ScrollGestureAction.Pan)]
     [InlineData(ScrollInputGesture.TouchPinch, ScrollGestureAction.Zoom)]
-    [InlineData(ScrollInputGesture.MouseLeftDrag, ScrollGestureAction.Pan)]
+    [InlineData(ScrollInputGesture.MouseLeftDrag, ScrollGestureAction.None)]
     [InlineData(ScrollInputGesture.MouseMiddleDrag, ScrollGestureAction.Pan)]
     [InlineData(ScrollInputGesture.MouseRightDrag, ScrollGestureAction.None)]
     [InlineData(ScrollInputGesture.MouseWheelTilt, ScrollGestureAction.HorizontalScroll)]
