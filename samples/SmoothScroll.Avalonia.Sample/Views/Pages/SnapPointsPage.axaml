@@ -1,4 +1,4 @@
-<ContentPage
+﻿<ContentPage
     x:Class="SmoothScroll.Avalonia.Sample.Views.Pages.SnapPointsPage"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -10,10 +10,17 @@
     mc:Ignorable="d"
     d:DesignHeight="450"
     d:DesignWidth="800">
-    <Grid Margin="24" RowDefinitions="Auto,*" RowSpacing="16">
+    <Grid
+        Margin="24"
+        RowDefinitions="Auto,*"
+        RowSpacing="16">
         <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
             <Button Click="PreviousButton_OnClick" Content="Previous" />
-            <Button Grid.Column="1" Classes="accent" Click="NextButton_OnClick" Content="Next" />
+            <Button
+                Grid.Column="1"
+                Classes="accent"
+                Click="NextButton_OnClick"
+                Content="Next" />
             <TextBlock
                 Grid.Column="2"
                 VerticalAlignment="Center"
@@ -30,15 +37,15 @@
             Grid.Row="1"
             BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
             BorderThickness="1"
-            CornerRadius="8"
-            ClipToBounds="True">
+            ClipToBounds="True"
+            CornerRadius="8">
             <ScrollViewer
                 x:Name="SnapScrollViewer"
+                VerticalContentAlignment="Top"
                 HorizontalScrollBarVisibility="Hidden"
                 HorizontalSnapPointsAlignment="Center"
                 HorizontalSnapPointsType="Mandatory"
                 ScrollViewer.IsScrollInertiaEnabled="True"
-                VerticalContentAlignment="Top"
                 VerticalScrollBarVisibility="Disabled">
                 <StackPanel
                     x:Name="SnapItems"
@@ -46,58 +53,110 @@
                     AreHorizontalSnapPointsRegular="True"
                     Orientation="Horizontal"
                     Spacing="24">
-                    <Border Width="520" Height="336" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}" CornerRadius="8" ClipToBounds="True">
+                    <Border
+                        Width="520"
+                        Height="336"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
                             <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" Stretch="UniformToFill" />
-                            <Border Grid.Row="1" Padding="16" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="16"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock FontSize="20" Text="01" />
                             </Border>
                         </Grid>
                     </Border>
-                    <Border Width="520" Height="336" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}" CornerRadius="8" ClipToBounds="True">
+                    <Border
+                        Width="520"
+                        Height="336"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
-                            <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" RenderTransformOrigin="0.25,0.5" Stretch="UniformToFill">
+                            <Image
+                                RenderTransformOrigin="0.25,0.5"
+                                Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                                Stretch="UniformToFill">
                                 <Image.RenderTransform>
                                     <ScaleTransform ScaleX="1.25" ScaleY="1.25" />
                                 </Image.RenderTransform>
                             </Image>
-                            <Border Grid.Row="1" Padding="16" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="16"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock FontSize="20" Text="02" />
                             </Border>
                         </Grid>
                     </Border>
-                    <Border Width="520" Height="336" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}" CornerRadius="8" ClipToBounds="True">
+                    <Border
+                        Width="520"
+                        Height="336"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
-                            <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" RenderTransformOrigin="0.75,0.5" Stretch="UniformToFill">
+                            <Image
+                                RenderTransformOrigin="0.75,0.5"
+                                Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                                Stretch="UniformToFill">
                                 <Image.RenderTransform>
                                     <ScaleTransform ScaleX="1.5" ScaleY="1.5" />
                                 </Image.RenderTransform>
                             </Image>
-                            <Border Grid.Row="1" Padding="16" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="16"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock FontSize="20" Text="03" />
                             </Border>
                         </Grid>
                     </Border>
-                    <Border Width="520" Height="336" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}" CornerRadius="8" ClipToBounds="True">
+                    <Border
+                        Width="520"
+                        Height="336"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
-                            <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" RenderTransformOrigin="0.5,0.75" Stretch="UniformToFill">
+                            <Image
+                                RenderTransformOrigin="0.5,0.75"
+                                Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                                Stretch="UniformToFill">
                                 <Image.RenderTransform>
                                     <ScaleTransform ScaleX="1.75" ScaleY="1.75" />
                                 </Image.RenderTransform>
                             </Image>
-                            <Border Grid.Row="1" Padding="16" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="16"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock FontSize="20" Text="04" />
                             </Border>
                         </Grid>
                     </Border>
-                    <Border Width="520" Height="336" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}" CornerRadius="8" ClipToBounds="True">
+                    <Border
+                        Width="520"
+                        Height="336"
+                        Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
-                            <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" RenderTransformOrigin="0.5,0.25" Stretch="UniformToFill">
+                            <Image
+                                RenderTransformOrigin="0.5,0.25"
+                                Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                                Stretch="UniformToFill">
                                 <Image.RenderTransform>
                                     <ScaleTransform ScaleX="2" ScaleY="2" />
                                 </Image.RenderTransform>
                             </Image>
-                            <Border Grid.Row="1" Padding="16" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="16"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock FontSize="20" Text="05" />
                             </Border>
                         </Grid>

@@ -863,9 +863,11 @@ public sealed class ScrollViewHeadlessTests
     }
 
     [AvaloniaFact]
-    public void StandardBringIntoViewUsesImmediateMinimalScroll()
+    public void DisabledBringIntoViewAnimationUsesImmediateMinimalScroll()
     {
         using var host = new BringIntoViewHost();
+        var presenter = Assert.IsType<ScrollPresenter>(host.View.Presenter);
+        presenter.IsBringIntoViewAnimationEnabled = false;
         var wasHandled = false;
         host.View.AddHandler(
             Control.RequestBringIntoViewEvent,
@@ -877,6 +879,36 @@ public sealed class ScrollViewHeadlessTests
         _ = host.Render();
 
         Assert.True(wasHandled);
+        AssertVectorEqual(new Vector(400, 380), host.View.Offset);
+    }
+
+    [AvaloniaFact]
+    public void StandardBringIntoViewUsesAnimation()
+    {
+        using var host = new BringIntoViewHost();
+        var presenter = Assert.IsType<ScrollPresenter>(host.View.Presenter);
+        ScrollAnimationStartingEventArgs? animationArgs = null;
+        presenter.ScrollAnimationStarting += (_, args) => animationArgs = args;
+
+        host.Target.BringIntoView();
+
+        Assert.NotNull(animationArgs);
+        Assert.Equal(default, animationArgs.StartingPosition);
+        AssertVectorEqual(new Vector(400, 380), animationArgs.EndPosition);
+    }
+
+    [AvaloniaFact]
+    public void ExplicitlyImmediateBringIntoViewOverridesDefaultAnimation()
+    {
+        using var host = new BringIntoViewHost();
+        var presenter = Assert.IsType<ScrollPresenter>(host.View.Presenter);
+        var animationStarted = false;
+        presenter.ScrollAnimationStarting += (_, _) => animationStarted = true;
+
+        host.Target.BringIntoView(isAnimated: false);
+        _ = host.Render();
+
+        Assert.False(animationStarted);
         AssertVectorEqual(new Vector(400, 380), host.View.Offset);
     }
 
@@ -935,7 +967,7 @@ public sealed class ScrollViewHeadlessTests
         host.View.ScrollTo(default);
         _ = host.Render();
 
-        host.Target.BringIntoView();
+        host.Target.BringIntoView(isAnimated: false);
         _ = host.Render();
 
         AssertVectorEqual(new Vector(1500, 1260), host.View.Offset);

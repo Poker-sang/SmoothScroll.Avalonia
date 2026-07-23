@@ -1,4 +1,4 @@
-<ContentPage
+﻿<ContentPage
     x:Class="SmoothScroll.Avalonia.Sample.Views.Pages.BringIntoViewPage"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -10,7 +10,10 @@
     mc:Ignorable="d"
     d:DesignHeight="450"
     d:DesignWidth="800">
-    <Grid Margin="24" RowDefinitions="Auto,*" RowSpacing="16">
+    <Grid
+        Margin="24"
+        RowDefinitions="Auto,*"
+        RowSpacing="16">
         <Grid ColumnDefinitions="220,Auto,Auto,*,Auto" ColumnSpacing="8">
             <ComboBox x:Name="TargetSelector" SelectedIndex="3">
                 <ComboBoxItem Content="Upper left" />
@@ -18,8 +21,15 @@
                 <ComboBoxItem Content="Lower left" />
                 <ComboBoxItem Content="Lower right" />
             </ComboBox>
-            <Button Grid.Column="1" Classes="accent" Click="AnimatedButton_OnClick" Content="Animate" />
-            <Button Grid.Column="2" Click="ImmediateButton_OnClick" Content="Immediate" />
+            <Button
+                Grid.Column="1"
+                Classes="accent"
+                Click="AnimatedButton_OnClick"
+                Content="Animate" />
+            <Button
+                Grid.Column="2"
+                Click="ImmediateButton_OnClick"
+                Content="Immediate" />
             <TextBlock
                 Grid.Column="4"
                 VerticalAlignment="Center"
@@ -31,95 +41,119 @@
             Grid.Row="1"
             BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
             BorderThickness="1"
-            CornerRadius="8"
-            ClipToBounds="True">
+            ClipToBounds="True"
+            CornerRadius="8">
             <ScrollViewer
                 x:Name="BringIntoViewScrollViewer"
                 HorizontalContentAlignment="Left"
-                HorizontalScrollBarVisibility="Auto"
                 VerticalContentAlignment="Top"
+                HorizontalScrollBarVisibility="Auto"
                 VerticalScrollBarVisibility="Auto">
-                <Canvas Width="1800" Height="1200" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                <Canvas
+                    Width="1800"
+                    Height="1200"
+                    Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                     <Border
                         x:Name="UpperLeftTarget"
-                        Width="240"
-                        Height="180"
                         Canvas.Left="100"
                         Canvas.Top="96"
+                        Width="240"
+                        Height="180"
                         Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                         BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                         BorderThickness="1"
-                        CornerRadius="8"
-                        ClipToBounds="True">
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
                             <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" Stretch="UniformToFill" />
-                            <Border Grid.Row="1" Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="12"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock Text="Upper left" />
                             </Border>
                         </Grid>
                     </Border>
                     <Border
                         x:Name="UpperRightTarget"
-                        Width="240"
-                        Height="180"
                         Canvas.Left="1420"
                         Canvas.Top="144"
+                        Width="240"
+                        Height="180"
                         Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                         BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                         BorderThickness="1"
-                        CornerRadius="8"
-                        ClipToBounds="True">
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
-                            <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" RenderTransformOrigin="0.75,0.5" Stretch="UniformToFill">
+                            <Image
+                                RenderTransformOrigin="0.75,0.5"
+                                Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                                Stretch="UniformToFill">
                                 <Image.RenderTransform>
                                     <ScaleTransform ScaleX="1.4" ScaleY="1.4" />
                                 </Image.RenderTransform>
                             </Image>
-                            <Border Grid.Row="1" Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="12"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock Text="Upper right" />
                             </Border>
                         </Grid>
                     </Border>
                     <Border
                         x:Name="LowerLeftTarget"
-                        Width="240"
-                        Height="180"
                         Canvas.Left="170"
                         Canvas.Top="900"
+                        Width="240"
+                        Height="180"
                         Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                         BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                         BorderThickness="1"
-                        CornerRadius="8"
-                        ClipToBounds="True">
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
-                            <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" RenderTransformOrigin="0.25,0.75" Stretch="UniformToFill">
+                            <Image
+                                RenderTransformOrigin="0.25,0.75"
+                                Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                                Stretch="UniformToFill">
                                 <Image.RenderTransform>
                                     <ScaleTransform ScaleX="1.6" ScaleY="1.6" />
                                 </Image.RenderTransform>
                             </Image>
-                            <Border Grid.Row="1" Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="12"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock Text="Lower left" />
                             </Border>
                         </Grid>
                     </Border>
                     <Border
                         x:Name="LowerRightTarget"
-                        Width="240"
-                        Height="180"
                         Canvas.Left="1400"
                         Canvas.Top="850"
+                        Width="240"
+                        Height="180"
                         Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
                         BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
                         BorderThickness="1"
-                        CornerRadius="8"
-                        ClipToBounds="True">
+                        ClipToBounds="True"
+                        CornerRadius="8">
                         <Grid RowDefinitions="*,Auto">
-                            <Image Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp" RenderTransformOrigin="0.65,0.3" Stretch="UniformToFill">
+                            <Image
+                                RenderTransformOrigin="0.65,0.3"
+                                Source="avares://SmoothScroll.Avalonia.Sample/Assets/Images/4074.bmp"
+                                Stretch="UniformToFill">
                                 <Image.RenderTransform>
                                     <ScaleTransform ScaleX="1.9" ScaleY="1.9" />
                                 </Image.RenderTransform>
                             </Image>
-                            <Border Grid.Row="1" Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+                            <Border
+                                Grid.Row="1"
+                                Padding="12"
+                                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
                                 <TextBlock Text="Lower right" />
                             </Border>
                         </Grid>

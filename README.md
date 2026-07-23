@@ -121,8 +121,9 @@ remain supported internally and move by one `Viewport.Height`, reported as user 
 
 ### Bringing content into view
 
-Avalonia's parameterless `BringIntoView()` performs an immediate minimal-distance scroll. Importing
-`SmoothScroll.Avalonia.Controls` adds animation-aware overloads:
+`ScrollPresenter` animates Avalonia's parameterless `BringIntoView()` by default. Set
+`IsBringIntoViewAnimationEnabled` to `false` to use an immediate minimal-distance scroll instead.
+Importing `SmoothScroll.Avalonia.Controls` also adds animation-aware overloads:
 
 | API                                                    | Meaning                                                  |
 | ------------------------------------------------------ | -------------------------------------------------------- |

@@ -145,6 +145,12 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     public static readonly StyledProperty<double> OverscrollBounceRateProperty =
         AvaloniaProperty.Register<ScrollPresenter, double>(nameof(OverscrollBounceRate), 1);
 
+    /// <summary>
+    /// Defines the <see cref="IsBringIntoViewAnimationEnabled"/> property.
+    /// </summary>
+    public static readonly StyledProperty<bool> IsBringIntoViewAnimationEnabledProperty =
+        AvaloniaProperty.Register<ScrollPresenter, bool>(nameof(IsBringIntoViewAnimationEnabled), true);
+
     public event EventHandler<ScrollAnimationStartingEventArgs>? ScrollAnimationStarting;
 
     private InteractionTracker? _interactionTracker;
@@ -238,6 +244,15 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     {
         get => GetValue(CanVerticallyScrollProperty);
         set => SetValue(CanVerticallyScrollProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether standard bring-into-view requests without an explicit animation preference are animated.
+    /// </summary>
+    public bool IsBringIntoViewAnimationEnabled
+    {
+        get => GetValue(IsBringIntoViewAnimationEnabledProperty);
+        set => SetValue(IsBringIntoViewAnimationEnabledProperty, value);
     }
 
     /// <summary>
@@ -476,7 +491,7 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     /// <param name="targetRect">The portion of the target visual to bring into view.</param>
     /// <returns>True if the scroll offset was changed; otherwise false.</returns>
     public bool BringDescendantIntoView(Visual target, Rect targetRect) =>
-        BringDescendantIntoView(target, targetRect, isAnimated: false);
+        BringDescendantIntoView(target, targetRect, IsBringIntoViewAnimationEnabled);
 
     /// <summary>
     /// Attempts to bring a portion of a descendant visual into view by scrolling the content.
@@ -1191,7 +1206,9 @@ public sealed partial class ScrollPresenter : ContentPresenter, IScrollable, ISc
     {
         if (e.TargetObject is not null)
         {
-            var isAnimated = e is SmoothScrollBringIntoViewRequestEventArgs { IsAnimated: true };
+            var isAnimated = e is SmoothScrollBringIntoViewRequestEventArgs request
+                ? request.IsAnimated
+                : IsBringIntoViewAnimationEnabled;
             e.Handled = BringDescendantIntoView(e.TargetObject, e.TargetRect, isAnimated);
         }
     }

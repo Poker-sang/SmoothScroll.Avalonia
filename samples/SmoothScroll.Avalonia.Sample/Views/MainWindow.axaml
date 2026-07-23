@@ -1,4 +1,4 @@
-<Window
+﻿<Window
     x:Class="SmoothScroll.Avalonia.Sample.Views.MainWindow"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -8,9 +8,9 @@
     xmlns:views="using:SmoothScroll.Avalonia.Sample.Views"
     xmlns:vm="using:SmoothScroll.Avalonia.Sample.ViewModels"
     Title="SmoothScroll.Avalonia"
-    d:DesignHeight="450"
-    d:DesignWidth="800"
     Icon="/Assets/avalonia-logo.ico"
-    mc:Ignorable="d">
+    mc:Ignorable="d"
+    d:DesignHeight="450"
+    d:DesignWidth="800">
     <views:MainView />
 </Window>
