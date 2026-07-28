@@ -36,6 +36,9 @@ https://github.com/user-attachments/assets/927a8c80-ac2b-4d50-b86b-8b2fe853ce5d
 </Application>
 ```
 
+自定义 `ScrollViewer` 模板应使用 `ScrollViewerPresenter` 作为 `PART_ContentPresenter`。
+`ScrollPresenter` 保留为 `ScrollView` 使用的物理滚动实现。
+
 但如果你需要更精细的滚动控制，或者对拖拽、缩放有需求，你可以使用以下完全独立的 `ScrollView` 控件。
 
 ## ScrollView

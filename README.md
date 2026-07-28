@@ -47,6 +47,9 @@ The theme replaces the internal presenter with the smooth presenter while preser
 `ScrollViewer` contract. Use the standalone `ScrollView` for independent axis modes, panning,
 zooming, gesture remapping, and operation lifecycle events.
 
+Custom `ScrollViewer` templates should use `ScrollViewerPresenter` for the `PART_ContentPresenter`
+part. `ScrollPresenter` provides the physical scrolling semantics used by `ScrollView`.
+
 ## ScrollView
 
 Add `ScrollViewDefaultTheme` to the application styles before using `ScrollView`:

@@ -34,7 +34,7 @@ public sealed class ScrollViewerSmoothThemeTests
         {
             window.Show();
             Render(window);
-            var presenter = Assert.IsType<ScrollPresenter>(view.Presenter);
+            var presenter = Assert.IsType<ScrollViewerPresenter>(view.Presenter);
 
             Assert.True(presenter.IsHorizontalMeasureInfinite);
             Assert.Equal(ScrollMode.Enabled, presenter.HorizontalScrollMode);
@@ -173,7 +173,7 @@ public sealed class ScrollViewerSmoothThemeTests
         {
             window.Show();
             Render(window);
-            var presenter = Assert.IsType<ScrollPresenter>(view.Presenter);
+            var presenter = Assert.IsType<ScrollViewerPresenter>(view.Presenter);
             Assert.Equal(ScrollMode.Enabled, presenter.HorizontalScrollMode);
             Assert.Equal(ScrollMode.Enabled, presenter.VerticalScrollMode);
 
@@ -220,7 +220,7 @@ public sealed class ScrollViewerSmoothThemeTests
         {
             window.Show();
             Render(window);
-            var presenter = Assert.IsType<ScrollPresenter>(view.Presenter);
+            var presenter = Assert.IsType<ScrollViewerPresenter>(view.Presenter);
 
             Assert.True(presenter.IsHorizontalMeasureInfinite);
             Assert.True(items.DesiredSize.Width > presenter.Viewport.Width);
@@ -267,7 +267,7 @@ public sealed class ScrollViewerSmoothThemeTests
         {
             window.Show();
             Render(window);
-            var presenter = Assert.IsType<ScrollPresenter>(view.Presenter);
+            var presenter = Assert.IsType<ScrollViewerPresenter>(view.Presenter);
 
             Assert.Equal(default, view.Offset);
             Assert.Equal(content.Width, presenter.Extent.Width, 3);
@@ -284,7 +284,7 @@ public sealed class ScrollViewerSmoothThemeTests
     [AvaloniaFact]
     public void PresenterOutsideTheThemeSelectorUsesScrollViewerFallbackBindings()
     {
-        var nestedPresenter = new ScrollPresenter
+        var nestedPresenter = new ScrollViewerPresenter
         {
             Content = new Border { Width = 1200, Height = 100 }
         };
@@ -313,6 +313,64 @@ public sealed class ScrollViewerSmoothThemeTests
             Assert.False(nestedPresenter.IsVerticalMeasureInfinite);
             Assert.Equal(ScrollMode.Enabled, nestedPresenter.HorizontalScrollMode);
             Assert.Equal(ScrollMode.Disabled, nestedPresenter.VerticalScrollMode);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void LogicalScrollableContentUsesNativeStateDuringSmoothScrolling()
+    {
+        var content = new LogicalScrollableContent(new Size(900, 1600));
+        var view = new ScrollViewer
+        {
+            Width = 500,
+            Height = 300,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            Content = content
+        };
+        var window = new Window
+        {
+            Width = 500,
+            Height = 300,
+            WindowDecorations = WindowDecorations.None,
+            Content = view
+        };
+
+        try
+        {
+            window.Show();
+            Render(window);
+            var presenter = Assert.IsType<ScrollViewerPresenter>(view.Presenter);
+
+            Assert.True(double.IsFinite(content.LastMeasureConstraint.Width));
+            Assert.True(double.IsFinite(content.LastMeasureConstraint.Height));
+            Assert.Equal(content.Extent, presenter.Extent);
+            Assert.Equal(content.Viewport, presenter.Viewport);
+            Assert.True(content.CanHorizontallyScroll);
+            Assert.True(content.CanVerticallyScroll);
+
+            content.Offset = new Vector(0, 180);
+            Render(window);
+            Assert.Equal(content.Offset, view.Offset);
+
+            content.Offset = default;
+            Render(window);
+            window.MouseWheel(new Point(250, 150), new Vector(0, -1));
+            var offsets = new List<double>();
+            for (var i = 0; i < 80; i++)
+            {
+                Thread.Sleep(10);
+                Render(window);
+                offsets.Add(content.Offset.Y);
+                Assert.Equal(view.Offset.Y, content.Offset.Y, 3);
+            }
+
+            Assert.Contains(offsets, offset => offset > 1);
+            Assert.Contains(offsets, offset => offset > 1 && offset < content.Offset.Y - 1);
         }
         finally
         {
@@ -360,12 +418,12 @@ public sealed class ScrollViewerSmoothThemeTests
             };
             Window.Show();
             Render(Window);
-            Presenter = Assert.IsType<ScrollPresenter>(View.Presenter);
+            Presenter = Assert.IsType<ScrollViewerPresenter>(View.Presenter);
         }
 
         public StackPanel Items { get; }
 
-        public ScrollPresenter Presenter { get; }
+        public ScrollViewerPresenter Presenter { get; }
 
         public ScrollViewer View { get; }
 
@@ -393,5 +451,69 @@ public sealed class ScrollViewerSmoothThemeTests
             Window.MouseWheel(new Point(600, 300), new Vector(0, delta));
 
         public void Dispose() => Window.Close();
+    }
+
+    private sealed class LogicalScrollableContent(Size extent) : Control, ILogicalScrollable
+    {
+        private Vector _offset;
+        private Size _viewport;
+
+        public bool CanHorizontallyScroll { get; set; }
+
+        public bool CanVerticallyScroll { get; set; }
+
+        public bool IsLogicalScrollEnabled => true;
+
+        public Size ScrollSize => new(10, 50);
+
+        public Size PageScrollSize => new(100, 100);
+
+        public Size Extent { get; } = extent;
+
+        public Vector Offset
+        {
+            get => _offset;
+            set
+            {
+                var maximum = new Vector(
+                    Math.Max(Extent.Width - Viewport.Width, 0),
+                    Math.Max(Extent.Height - Viewport.Height, 0));
+                var coerced = new Vector(
+                    Math.Clamp(value.X, 0, maximum.X),
+                    Math.Clamp(value.Y, 0, maximum.Y));
+                if (_offset == coerced)
+                    return;
+
+                _offset = coerced;
+                RaiseScrollInvalidated(EventArgs.Empty);
+            }
+        }
+
+        public Size Viewport => _viewport;
+
+        public Size LastMeasureConstraint { get; private set; }
+
+        public event EventHandler? ScrollInvalidated;
+
+        public bool BringIntoView(Control target, Rect targetRect) => false;
+
+        public Control? GetControlInDirection(NavigationDirection direction, Control? from) => null;
+
+        public void RaiseScrollInvalidated(EventArgs e) => ScrollInvalidated?.Invoke(this, e);
+
+        protected override Size MeasureOverride(Size availableSize)
+        {
+            LastMeasureConstraint = availableSize;
+            var viewport = new Size(
+                double.IsFinite(availableSize.Width) ? availableSize.Width : Extent.Width,
+                double.IsFinite(availableSize.Height) ? availableSize.Height : Extent.Height);
+            if (_viewport != viewport)
+            {
+                _viewport = viewport;
+                RaiseScrollInvalidated(EventArgs.Empty);
+            }
+
+            return viewport;
+        }
     }
 }

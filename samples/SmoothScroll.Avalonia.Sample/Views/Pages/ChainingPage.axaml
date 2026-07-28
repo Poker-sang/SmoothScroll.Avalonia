@@ -2,7 +2,6 @@
     x:Class="SmoothScroll.Avalonia.Sample.Views.Pages.ChainingPage"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:SmoothScroll.Avalonia.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Header="Chaining"
@@ -162,13 +161,9 @@
                     <ScrollViewer
                         x:Name="HorizontalSnapsScrollViewer"
                         Height="400"
-                        HorizontalAlignment="Stretch">
-                        <ScrollViewer.Styles>
-                            <Style Selector="controls|ScrollPresenter">
-                                <Setter Property="IsHorizontalMeasureInfinite" Value="True" />
-                                <Setter Property="IsVerticalMeasureInfinite" Value="False" />
-                            </Style>
-                        </ScrollViewer.Styles>
+                        HorizontalAlignment="Stretch"
+                        HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Disabled">
                         <StackPanel
                             HorizontalAlignment="Stretch"
                             Orientation="Horizontal"

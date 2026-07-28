@@ -126,6 +126,60 @@ public sealed class ScrollViewHeadlessTests
     }
 
     [AvaloniaFact]
+    public void LogicalScrollableContentKeepsScrollViewPhysicalSemantics()
+    {
+        var content = new ScrollViewLogicalContent(
+            new Size(900, 1600),
+            new Size(1900, 2600))
+        {
+            Width = 900,
+            Height = 1600
+        };
+        var view = new ScrollView
+        {
+            Width = 500,
+            Height = 300,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            HorizontalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            Content = content
+        };
+        var window = new Window
+        {
+            Width = 500,
+            Height = 300,
+            WindowDecorations = WindowDecorations.None,
+            Content = view
+        };
+
+        try
+        {
+            window.Show();
+            Render(window);
+
+            Assert.Equal(new Size(900, 1600), view.Extent);
+            Assert.Equal(0, content.ScrollInvalidatedSubscriberCount);
+            Assert.False(content.CanHorizontallyScroll);
+            Assert.False(content.CanVerticallyScroll);
+
+            content.Offset = new Vector(0, 80);
+            Render(window);
+            AssertVectorEqual(default, view.Offset);
+
+            content.Offset = default;
+            _ = view.ScrollTo(new Vector(0, 180), isAnimated: false);
+            Render(window);
+            Assert.Equal(180, view.Offset.Y, 3);
+            AssertVectorEqual(default, content.Offset);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void DefaultInertiaRatesMatchLegacyWheelAndZoomHalfLife()
     {
         using var host = new ScrollViewHost(new Size(800, 600), new Size(1200, 900));
@@ -938,7 +992,7 @@ public sealed class ScrollViewHeadlessTests
     public void ThemedScrollViewerAnimatedBringIntoViewUsesScrollPresenterAnimation()
     {
         using var host = new ScrollViewerBringIntoViewHost();
-        var presenter = Assert.IsType<ScrollPresenter>(host.View.Presenter);
+        var presenter = Assert.IsType<ScrollViewerPresenter>(host.View.Presenter);
         ScrollAnimationStartingEventArgs? animationArgs = null;
         presenter.ScrollAnimationStarting += (_, args) => animationArgs = args;
 
@@ -1667,11 +1721,74 @@ public sealed class ScrollViewHeadlessTests
         Assert.Equal(expected.Y, actual.Y, 3);
     }
 
+    private static void Render(Window window)
+    {
+        for (var i = 0; i < 4; i++)
+            _ = window.CaptureRenderedFrame();
+    }
+
     private static ScrollGestureBindings CreateLeftMousePanBindings()
     {
         var bindings = ScrollGestureBindings.CreateDefault();
         bindings[new ScrollGesture(ScrollInputGesture.MouseLeftDrag)] = ScrollGestureAction.Pan;
         return bindings;
+    }
+
+    private sealed class ScrollViewLogicalContent(Size desiredSize, Size extent) : Control, ILogicalScrollable
+    {
+        private EventHandler? _scrollInvalidated;
+        private Vector _offset;
+
+        public bool CanHorizontallyScroll { get; set; }
+
+        public bool CanVerticallyScroll { get; set; }
+
+        public bool IsLogicalScrollEnabled => true;
+
+        public Size ScrollSize => new(10, 50);
+
+        public Size PageScrollSize => new(100, 100);
+
+        public Size Extent { get; } = extent;
+
+        public Vector Offset
+        {
+            get => _offset;
+            set
+            {
+                if (_offset == value)
+                    return;
+
+                _offset = value;
+                _scrollInvalidated?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        public Size Viewport => new(500, 300);
+
+        public int ScrollInvalidatedSubscriberCount { get; private set; }
+
+        public event EventHandler? ScrollInvalidated
+        {
+            add
+            {
+                _scrollInvalidated += value;
+                ScrollInvalidatedSubscriberCount++;
+            }
+            remove
+            {
+                _scrollInvalidated -= value;
+                ScrollInvalidatedSubscriberCount--;
+            }
+        }
+
+        public bool BringIntoView(Control target, Rect targetRect) => false;
+
+        public Control? GetControlInDirection(NavigationDirection direction, Control? from) => null;
+
+        public void RaiseScrollInvalidated(EventArgs e) => _scrollInvalidated?.Invoke(this, e);
+
+        protected override Size MeasureOverride(Size availableSize) => desiredSize;
     }
 
     private sealed class ScrollViewHost : IDisposable

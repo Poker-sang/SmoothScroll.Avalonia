@@ -10,7 +10,7 @@
                 <Setter Property="Template">
                     <ControlTemplate>
                         <Panel>
-                            <controls:ScrollPresenter
+                            <controls:ScrollViewerPresenter
                                 Name="PART_ContentPresenter"
                                 Grid.Row="0"
                                 Grid.Column="0"
@@ -53,17 +53,17 @@
             </ControlTheme>
         </ResourceDictionary>
     </Styles.Resources>
-    <Style Selector="ScrollViewer /template/ controls|ScrollPresenter#PART_ContentPresenter">
+    <Style Selector="ScrollViewer /template/ controls|ScrollViewerPresenter#PART_ContentPresenter">
         <Setter Property="HorizontalScrollMode" Value="Enabled" />
         <Setter Property="IsHorizontalMeasureInfinite" Value="True" />
         <Setter Property="IsVerticalMeasureInfinite" Value="True" />
         <Setter Property="VerticalScrollMode" Value="Enabled" />
     </Style>
-    <Style Selector="ScrollViewer[HorizontalScrollBarVisibility=Disabled] /template/ controls|ScrollPresenter#PART_ContentPresenter">
+    <Style Selector="ScrollViewer[HorizontalScrollBarVisibility=Disabled] /template/ controls|ScrollViewerPresenter#PART_ContentPresenter">
         <Setter Property="HorizontalScrollMode" Value="Disabled" />
         <Setter Property="IsHorizontalMeasureInfinite" Value="False" />
     </Style>
-    <Style Selector="ScrollViewer[VerticalScrollBarVisibility=Disabled] /template/ controls|ScrollPresenter#PART_ContentPresenter">
+    <Style Selector="ScrollViewer[VerticalScrollBarVisibility=Disabled] /template/ controls|ScrollViewerPresenter#PART_ContentPresenter">
         <Setter Property="IsVerticalMeasureInfinite" Value="False" />
         <Setter Property="VerticalScrollMode" Value="Disabled" />
     </Style>
