@@ -18,6 +18,76 @@ namespace SmoothScroll.Avalonia.Tests;
 public sealed class ScrollViewHeadlessTests
 {
     [AvaloniaFact]
+    public void OffsetIsPreservedWhenReattachedToVisualTree()
+    {
+        var marker = new Border
+        {
+            Width = 40,
+            Height = 40,
+            Background = Brushes.Red
+        };
+        Canvas.SetLeft(marker, 300);
+        Canvas.SetTop(marker, 240);
+        var content = new Canvas
+        {
+            Width = 1000,
+            Height = 900,
+            Background = Brushes.Black,
+            Children = { marker }
+        };
+        var view = new ScrollView
+        {
+            Width = 500,
+            Height = 300,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            HorizontalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
+            Content = content
+        };
+        var navigationHost = new ContentControl { Content = view };
+        var window = new Window
+        {
+            Width = 500,
+            Height = 300,
+            WindowDecorations = WindowDecorations.None,
+            Content = navigationHost
+        };
+
+        try
+        {
+            window.Show();
+            Render(window);
+            var presenter = Assert.IsType<ScrollPresenter>(view.Presenter);
+            var expectedOffset = new Vector(240, 180);
+            view.ScrollTo(expectedOffset, isAnimated: false);
+            Render(window);
+            var expectedMarkerBounds = FindRedBounds(
+                window.CaptureRenderedFrame()
+                ?? throw new InvalidOperationException("The headless renderer did not produce a frame."));
+
+            AssertVectorEqual(expectedOffset, view.Offset);
+            AssertVectorEqual(expectedOffset, presenter.Offset);
+
+            navigationHost.Content = new Border();
+            Render(window);
+            navigationHost.Content = view;
+            Render(window);
+            var actualMarkerBounds = FindRedBounds(
+                window.CaptureRenderedFrame()
+                ?? throw new InvalidOperationException("The headless renderer did not produce a frame."));
+
+            AssertVectorEqual(expectedOffset, view.Offset);
+            AssertVectorEqual(expectedOffset, presenter.Offset);
+            Assert.Equal(expectedMarkerBounds, actualMarkerBounds);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void ContentIsCenteredOnFirstFrameAndAfterResize()
     {
         using var host = new ScrollViewHost(new Size(800, 600), new Size(200, 120));

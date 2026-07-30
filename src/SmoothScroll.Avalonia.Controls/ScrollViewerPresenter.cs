@@ -28,17 +28,9 @@ public sealed class ScrollViewerPresenter : ScrollPresenter
     /// <inheritdoc />
     protected override void OnLoaded(RoutedEventArgs e)
     {
+        // Keep owner bindings across temporary visual-tree detachment so cached pages retain their scroll state.
         AttachToScrollViewer();
         base.OnLoaded(e);
-    }
-
-    /// <inheritdoc />
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        _ownerSubscriptions?.Dispose();
-        _ownerSubscriptions = null;
-        _owner = null;
-        base.OnDetachedFromVisualTree(e);
     }
 
     /// <inheritdoc />
@@ -142,16 +134,14 @@ public sealed class ScrollViewerPresenter : ScrollPresenter
         var owner = this.FindAncestorOfType<ScrollViewer>();
         if (owner is null)
         {
-            _owner = null;
-            _ownerSubscriptions?.Dispose();
-            _ownerSubscriptions = null;
+            DetachFromScrollViewer();
             return;
         }
 
         if (ReferenceEquals(owner, _owner))
             return;
 
-        _ownerSubscriptions?.Dispose();
+        DetachFromScrollViewer();
         _owner = owner;
 
         // Custom ScrollViewer themes may omit the semantic setters used by the bundled theme.
@@ -181,6 +171,15 @@ public sealed class ScrollViewerPresenter : ScrollPresenter
         IDisposable? IfUnset<TProperty>(TProperty property, Func<TProperty, IDisposable> bind)
             where TProperty : AvaloniaProperty =>
             IsSet(property) ? null : bind(property);
+    }
+
+    private void DetachFromScrollViewer()
+    {
+        // Disposing the template-priority bindings restores their fallback values.
+        // Stop forwarding presenter changes before Offset falls back to zero.
+        _owner = null;
+        _ownerSubscriptions?.Dispose();
+        _ownerSubscriptions = null;
     }
 
     private void UpdateLogicalScrollableSubscription(Control? child)

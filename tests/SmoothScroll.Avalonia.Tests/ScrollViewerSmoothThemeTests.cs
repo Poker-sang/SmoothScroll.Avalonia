@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Media;
 using SmoothScroll.Avalonia.Controls;
 using SmoothScroll.Avalonia.Interaction;
 
@@ -11,6 +12,68 @@ namespace SmoothScroll.Avalonia.Tests;
 
 public sealed class ScrollViewerSmoothThemeTests
 {
+    [AvaloniaFact]
+    public void OffsetIsPreservedWhenReattachedToVisualTree()
+    {
+        var marker = new Border
+        {
+            Width = 40,
+            Height = 40,
+            Background = Brushes.Red
+        };
+        Canvas.SetLeft(marker, 300);
+        Canvas.SetTop(marker, 240);
+        var content = new Canvas
+        {
+            Width = 1000,
+            Height = 900,
+            Children = { marker }
+        };
+        var view = new ScrollViewer
+        {
+            Width = 500,
+            Height = 300,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            Content = content
+        };
+        var navigationHost = new ContentControl { Content = view };
+        var window = new Window
+        {
+            Width = 500,
+            Height = 300,
+            WindowDecorations = WindowDecorations.None,
+            Content = navigationHost
+        };
+
+        try
+        {
+            window.Show();
+            Render(window);
+            var presenter = Assert.IsType<ScrollViewerPresenter>(view.Presenter);
+            var expectedOffset = new Vector(240, 180);
+            presenter.ScrollTo(expectedOffset, isAnimated: false);
+            Render(window);
+
+            Assert.Equal(expectedOffset, view.Offset);
+            Assert.Equal(expectedOffset, presenter.Offset);
+            Assert.Same(marker, window.InputHitTest(new Point(70, 70)));
+
+            navigationHost.Content = new Border();
+            Render(window);
+            navigationHost.Content = view;
+            Render(window);
+
+            Assert.Equal(expectedOffset, view.Offset);
+            Assert.Equal(expectedOffset, presenter.Offset);
+            Assert.Same(marker, window.InputHitTest(new Point(70, 70)));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     [AvaloniaFact]
     public void ScrollBarVisibilitySelectorsUpdatePresenterSemantics()
     {
