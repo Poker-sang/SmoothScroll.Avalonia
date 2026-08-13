@@ -138,8 +138,9 @@ public partial class InteractionTracker : CompositionObject
 
     internal void RaiseValuesChanged(Vector3D position, double scale, int requestId)
     {
-        Position = position;
-        Scale = scale;
+        // Server notifications update the local mirror and must not be serialized back to the server.
+        _position = position;
+        _scale = scale;
         Owner?.ValuesChanged(this, new InteractionTrackerValuesChangedArgs(position, scale, requestId));
     }
 
