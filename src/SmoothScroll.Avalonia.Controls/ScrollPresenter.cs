@@ -1154,6 +1154,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     {
         if (e.OldValue is Control oldChild)
         {
+            oldChild.AttachedToVisualTree -= ChildAttachedToVisualTree;
             ClearScrollAnimation(ElementComposition.GetElementVisual(oldChild));
         }
         else
@@ -1169,7 +1170,16 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
         }
 
         OnChildChanged(e.NewValue as Control);
+        if (e.NewValue is Control newChild)
+            newChild.AttachedToVisualTree += ChildAttachedToVisualTree;
         EnsureScrollAnimation();
+    }
+
+    private void ChildAttachedToVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        // Cached pages can render before Loaded runs. Restore the composition transform as soon
+        // as its child visual is available, so the first frame uses the retained tracker state.
+        Initialize();
     }
 
     /// <summary>

@@ -46,8 +46,10 @@ public sealed class ScrollViewHeadlessTests
         Assert.True(delta > 0 ? host.View.ZoomFactor > 1 : host.View.ZoomFactor < 1);
     }
 
-    [AvaloniaFact]
-    public void OffsetIsPreservedWhenReattachedToVisualTree()
+    [AvaloniaTheory]
+    [InlineData(1)]
+    [InlineData(1.5)]
+    public void OffsetIsPreservedWhenReattachedToVisualTree(double scale)
     {
         var marker = new Border
         {
@@ -70,6 +72,7 @@ public sealed class ScrollViewHeadlessTests
             Height = 300,
             HorizontalContentAlignment = HorizontalAlignment.Left,
             VerticalContentAlignment = VerticalAlignment.Top,
+            IsZoomEnabled = true,
             HorizontalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
             VerticalScrollBarVisibility = ScrollBarVisibilityMode.Hidden,
             Content = content
@@ -89,6 +92,8 @@ public sealed class ScrollViewHeadlessTests
             Render(window);
             var presenter = Assert.IsType<ScrollPresenter>(view.Presenter);
             var expectedOffset = new Vector(240, 180);
+            view.ZoomTo(scale, isAnimated: false);
+            Render(window);
             view.ScrollTo(expectedOffset, isAnimated: false);
             Render(window);
             var expectedMarkerBounds = FindRedBounds(
@@ -98,10 +103,21 @@ public sealed class ScrollViewHeadlessTests
             AssertVectorEqual(expectedOffset, view.Offset);
             AssertVectorEqual(expectedOffset, presenter.Offset);
 
-            navigationHost.Content = new Border();
-            Render(window);
-            navigationHost.Content = view;
-            Render(window);
+            for (var i = 0; i < 3; i++)
+            {
+                navigationHost.Content = new Border();
+                Render(window);
+                navigationHost.Content = view;
+                window.UpdateLayout();
+                // Commit and draw the first frame without pumping the lower-priority Loaded event.
+                global::Avalonia.Threading.Dispatcher.UIThread.RunJobs(global::Avalonia.Threading.DispatcherPriority.Render);
+                Assert.False(presenter.IsLoaded);
+                AssertVectorEqual(expectedOffset, view.Offset);
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+                using var firstFrame = window.GetLastRenderedFrame()!;
+                Assert.Equal(expectedMarkerBounds, FindRedBounds(firstFrame));
+                Render(window);
+            }
             var actualMarkerBounds = FindRedBounds(
                 window.CaptureRenderedFrame()
                 ?? throw new InvalidOperationException("The headless renderer did not produce a frame."));

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -5,6 +6,7 @@ using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using SmoothScroll.Avalonia.Controls;
 using SmoothScroll.Avalonia.Interaction;
 
@@ -59,10 +61,23 @@ public sealed class ScrollViewerSmoothThemeTests
             Assert.Equal(expectedOffset, presenter.Offset);
             Assert.Same(marker, window.InputHitTest(new Point(70, 70)));
 
-            navigationHost.Content = new Border();
-            Render(window);
-            navigationHost.Content = view;
-            Render(window);
+            using var expectedFrame = window.GetLastRenderedFrame()!;
+            var expectedPixels = ReadPixels(expectedFrame);
+            for (var i = 0; i < 3; i++)
+            {
+                navigationHost.Content = new Border();
+                Render(window);
+                navigationHost.Content = view;
+                window.UpdateLayout();
+                global::Avalonia.Threading.Dispatcher.UIThread.RunJobs(global::Avalonia.Threading.DispatcherPriority.Render);
+                Assert.False(presenter.IsLoaded);
+                Assert.Equal(expectedOffset, view.Offset);
+                Assert.Equal(expectedOffset, presenter.Offset);
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+                using var firstFrame = window.GetLastRenderedFrame()!;
+                Assert.Equal(expectedPixels, ReadPixels(firstFrame));
+                Render(window);
+            }
 
             Assert.Equal(expectedOffset, view.Offset);
             Assert.Equal(expectedOffset, presenter.Offset);
@@ -72,6 +87,14 @@ public sealed class ScrollViewerSmoothThemeTests
         {
             window.Close();
         }
+    }
+
+    private static byte[] ReadPixels(WriteableBitmap bitmap)
+    {
+        using var framebuffer = bitmap.Lock();
+        var pixels = new byte[framebuffer.RowBytes * framebuffer.Size.Height];
+        Marshal.Copy(framebuffer.Address, pixels, 0, pixels.Length);
+        return pixels;
     }
 
     [AvaloniaFact]
@@ -419,6 +442,25 @@ public sealed class ScrollViewerSmoothThemeTests
             content.Offset = new Vector(0, 180);
             Render(window);
             Assert.Equal(content.Offset, view.Offset);
+
+            var expectedOffset = content.Offset;
+            for (var i = 0; i < 3; i++)
+            {
+                window.Content = new Border();
+                Render(window);
+                window.Content = view;
+                window.UpdateLayout();
+                global::Avalonia.Threading.Dispatcher.UIThread.RunJobs(global::Avalonia.Threading.DispatcherPriority.Render);
+                Assert.False(presenter.IsLoaded);
+                Assert.Equal(expectedOffset, content.Offset);
+                Assert.Equal(expectedOffset, presenter.Offset);
+                Assert.Equal(expectedOffset, view.Offset);
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+                Render(window);
+                Assert.Equal(expectedOffset, content.Offset);
+                Assert.Equal(expectedOffset, presenter.Offset);
+                Assert.Equal(expectedOffset, view.Offset);
+            }
 
             content.Offset = default;
             Render(window);
