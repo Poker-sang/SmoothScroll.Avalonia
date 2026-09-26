@@ -1,4 +1,5 @@
 using Avalonia;
+using SmoothScroll.Avalonia.Interaction;
 
 namespace SmoothScroll.Avalonia.Controls;
 
@@ -7,15 +8,8 @@ internal static class ScrollGeometry
     public static (double Minimum, double Maximum) CalculateAxisRange(
         double scaledExtent,
         double viewport,
-        double alignment)
-    {
-        var overflow = scaledExtent - viewport;
-        if (overflow >= 0)
-            return (0, overflow);
-
-        var alignedPosition = overflow * Math.Clamp(alignment, 0, 1);
-        return (alignedPosition, alignedPosition);
-    }
+        double alignment) =>
+        InteractionTrackerContentBounds.CalculateAxisRange(scaledExtent, viewport, alignment);
 
     public static Vector ToTrackerPosition(
         Vector offset,

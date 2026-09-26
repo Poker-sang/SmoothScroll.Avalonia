@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using Avalonia;
 using Avalonia.Animation.Easings;
 using Avalonia.Controls;
@@ -1893,24 +1893,12 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
             return;
         }
 
-        var minPosition = new Vector3D(scrollableArea.MinPosition.X, scrollableArea.MinPosition.Y, 0);
-        var maxPosition = new Vector3D(scrollableArea.MaxPosition.X, scrollableArea.MaxPosition.Y, 0);
-        var boundsChanged = _interactionTracker.MinPosition != minPosition
-                            || _interactionTracker.MaxPosition != maxPosition;
-
-        _interactionTracker.MinPosition = minPosition;
-        _interactionTracker.MaxPosition = maxPosition;
-
-        if (boundsChanged)
-        {
-            var currentPosition = new Vector(_interactionTracker.Position.X, _interactionTracker.Position.Y);
-            var constrainedPosition = ScrollGeometry.ClampTrackerPosition(
-                currentPosition,
-                scrollableArea.MinPosition,
-                scrollableArea.MaxPosition);
-            _trackerPosition = constrainedPosition;
-            _interactionTracker.Position = new Vector3D(constrainedPosition.X, constrainedPosition.Y, 0);
-        }
+        // Send only layout geometry. The composition thread derives bounds from its own scale
+        // and constrains the position atomically, without a delayed UI-thread correction.
+        _interactionTracker.ConfigureContentBounds(new InteractionTrackerContentBounds(
+            scrollableArea.Extent,
+            Viewport,
+            new Vector(GetHorizontalContentAlignmentRatio(), GetVerticalContentAlignmentRatio())));
 
         var sourceMode = ScrollViewer.GetIsScrollInertiaEnabled(this) ? InteractionSourceMode.EnabledWithInertia : InteractionSourceMode.EnabledWithoutInertia;
 

@@ -17,6 +17,35 @@ namespace SmoothScroll.Avalonia.Tests;
 
 public sealed class ScrollViewHeadlessTests
 {
+    [AvaloniaTheory]
+    [InlineData(1, true)]
+    [InlineData(-1, true)]
+    [InlineData(1, false)]
+    [InlineData(-1, false)]
+    public void WheelZoomKeepsUnderflowCenteredOnEveryFrame(double delta, bool inertia)
+    {
+        using var host = new ScrollViewHost(
+            new Size(800, 600),
+            new Size(400, 300),
+            view =>
+            {
+                view.IsZoomEnabled = true;
+                view.IsScrollInertiaEnabled = inertia;
+            });
+        host.Window.MouseWheel(new Point(550, 400), new Vector(0, delta), RawInputModifiers.Control);
+        for (var i = 0; i < 24; i++)
+        {
+            Thread.Sleep(16);
+            global::Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            // CaptureRenderedFrame pumps several ticks and can hide a one-frame correction.
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            using var frame = host.Window.GetLastRenderedFrame()!;
+            AssertCentered(FindRedBounds(frame), frame.PixelSize);
+        }
+
+        Assert.True(delta > 0 ? host.View.ZoomFactor > 1 : host.View.ZoomFactor < 1);
+    }
+
     [AvaloniaFact]
     public void OffsetIsPreservedWhenReattachedToVisualTree()
     {

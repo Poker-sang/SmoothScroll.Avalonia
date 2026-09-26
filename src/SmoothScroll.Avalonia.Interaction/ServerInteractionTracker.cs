@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Rendering.Composition.Transport;
 using Avalonia.Threading;
@@ -12,6 +12,7 @@ internal partial class ServerInteractionTracker
     private InteractionTrackerState? _state;
     private InteractionTracker? _client;
     private readonly Queue<Action<InteractionTracker>> _pendingClientActions = [];
+    private InteractionTrackerContentBounds? _contentBounds;
 
     internal double OverscrollElasticity { get; private set; } = 0.5;
 
@@ -72,10 +73,35 @@ internal partial class ServerInteractionTracker
             currentPosition.Y - deltaY,
             currentPosition.Z);
 
-        Position = scaledNewPosition;
         Scale = newScale;
+        if (UpdateContentBounds())
+            scaledNewPosition = Vector3D.Clamp(scaledNewPosition, MinPosition, MaxPosition);
+        Position = scaledNewPosition;
+
+        // Scale, bounds and position must agree before either inertia or rendering observes them.
+        if (_contentBounds is not null)
+            State.ReceiveBoundsUpdate();
 
         NotifyValuesChanged(scaledNewPosition, newScale, requestId);
+    }
+
+    private bool UpdateContentBounds()
+    {
+        if (_contentBounds is not { } bounds)
+            return false;
+
+        (MinPosition, MaxPosition) = bounds.Calculate(Scale);
+        return true;
+    }
+
+    private void ConfigureContentBounds(InteractionTrackerContentBounds? bounds)
+    {
+        _contentBounds = bounds;
+        if (!UpdateContentBounds())
+            return;
+
+        SetPosition(Vector3D.Clamp(Position, MinPosition, MaxPosition), requestId: 0);
+        State.ReceiveBoundsUpdate();
     }
 
     internal void ChangeState(InteractionTrackerState newState)
@@ -213,6 +239,9 @@ internal partial class ServerInteractionTracker
                     ConfigurePhysics(
                         configurePhysicsRequest.OverscrollElasticity,
                         configurePhysicsRequest.OverscrollBounceRate);
+                    break;
+                case ConfigureContentBoundsRequest configureContentBoundsRequest:
+                    ConfigureContentBounds(configureContentBoundsRequest.Bounds);
                     break;
             }
         }

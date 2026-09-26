@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Input;
 using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Animations;
@@ -11,6 +11,7 @@ public partial class InteractionTracker : CompositionObject
     private int _requestId = 0;
 
     private readonly List<InteractionTrackerRequest> _pendingRequests = [];
+    private InteractionTrackerContentBounds? _contentBounds;
 
     internal new ServerInteractionTracker Server { get; }
 
@@ -136,11 +137,33 @@ public partial class InteractionTracker : CompositionObject
             Math.Max(overscrollBounceRate, 0.01)));
     }
 
+    /// <summary>
+    /// Configures bounds calculated from content geometry at the current composition scale.
+    /// Pass null to return to explicitly managed MinPosition and MaxPosition bounds.
+    /// </summary>
+    public void ConfigureContentBounds(InteractionTrackerContentBounds? bounds)
+    {
+        if (_contentBounds == bounds)
+            return;
+
+        _contentBounds = bounds;
+        UpdateContentBounds(Scale);
+        QueueRequest(new ConfigureContentBoundsRequest(NextRequestId(), bounds));
+    }
+
+    private void UpdateContentBounds(double scale)
+    {
+        // These are mirrors, not UI-authored bounds to serialize back over a newer server scale.
+        if (_contentBounds is { } bounds)
+            (_minPosition, _maxPosition) = bounds.Calculate(scale);
+    }
+
     internal void RaiseValuesChanged(Vector3D position, double scale, int requestId)
     {
         // Server notifications update the local mirror and must not be serialized back to the server.
         _position = position;
         _scale = scale;
+        UpdateContentBounds(scale);
         Owner?.ValuesChanged(this, new InteractionTrackerValuesChangedArgs(position, scale, requestId));
     }
 
@@ -243,6 +266,8 @@ internal record ApplyWheelDeltaRequest(int RequestId, Vector Delta, bool UseIner
 internal record UpdateInertiaRestingPositionRequest(int RequestId, Vector3D Position) : InteractionTrackerRequest(RequestId);
 
 internal record ConfigurePhysicsRequest(int RequestId, double OverscrollElasticity, double OverscrollBounceRate) : InteractionTrackerRequest(RequestId);
+
+internal record ConfigureContentBoundsRequest(int RequestId, InteractionTrackerContentBounds? Bounds) : InteractionTrackerRequest(RequestId);
 
 public static class CompositorExtensions
 {
