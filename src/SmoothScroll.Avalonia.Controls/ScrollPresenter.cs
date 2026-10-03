@@ -165,7 +165,6 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     private bool _zoomRequestAnimated;
     private bool _arranging;
     private HashSet<Control>? _anchorCandidates;
-    private Control? _anchorElement;
     private Rect _anchorElementBounds;
     private bool _isAnchorElementDirty;
     private bool _areVerticalSnapPointsRegular;
@@ -180,7 +179,6 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     private bool _isSnapPointsUpdated;
     private InteractionTrackerInertiaStateEnteredArgs? _inertiaArgs;
     private readonly DispatcherTimer _arrangeTimer;
-    private bool _hasPendingArrange;
     private long _lastScrollActivityTick;
     private ScrollView? _scrollViewOwner;
     private Vector _trackerPosition;
@@ -196,7 +194,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     private bool HasActiveTrackerRequest => _scrollRequestId is not null || _zoomRequestId is not null;
 
-    internal bool HasPendingArrange => _hasPendingArrange;
+    internal bool HasPendingArrange { get; private set; }
 
     /// <summary>
     /// Initializes static members of the <see cref="ScrollPresenter"/> class.
@@ -464,7 +462,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     /// <summary>
     /// Gets the anchor candidate selected by the most recently completed layout pass.
     /// </summary>
-    public Control? CurrentAnchor => _anchorElement;
+    public Control? CurrentAnchor { get; private set; }
 
     Control? IScrollAnchorProvider.CurrentAnchor => CurrentAnchor;
 
@@ -787,7 +785,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
         }
 
         _anchorCandidates ??= new();
-        _anchorCandidates.Add(element);
+        _ = _anchorCandidates.Add(element);
         _isAnchorElementDirty = true;
         InvalidateArrange();
     }
@@ -795,13 +793,13 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     /// <inheritdoc/>
     void IScrollAnchorProvider.UnregisterAnchorCandidate(Control element)
     {
-        _anchorCandidates?.Remove(element);
+        _ = (_anchorCandidates?.Remove(element));
         _isAnchorElementDirty = true;
         InvalidateArrange();
 
-        if (_anchorElement == element)
+        if (CurrentAnchor == element)
         {
-            _anchorElement = null;
+            CurrentAnchor = null;
         }
     }
 
@@ -884,7 +882,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
             else
                 ResetAnchorElement();
 
-            ArrangeOverrideImpl(size, GetArrangeOffset());
+            _ = ArrangeOverrideImpl(size, GetArrangeOffset());
             var anchoredOffset = Offset + TrackAnchor(anchoring.ElementHorizontal, anchoring.ElementVertical);
 
             UpdateComputedScrollMode(finalSize, useArrangedSize: true);
@@ -910,7 +908,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
             if (!Offset.NearlyEquals(targetOffset))
             {
                 ApplyAnchoredOffset(targetOffset, scrollableArea);
-                ArrangeOverrideImpl(size, GetArrangeOffset());
+                _ = ArrangeOverrideImpl(size, GetArrangeOffset());
             }
 
             SynchronizeCompositionVisualBeforeFirstAnimation();
@@ -967,7 +965,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     private void RequestArrangeOnScroll()
     {
-        _hasPendingArrange = true;
+        HasPendingArrange = true;
         _lastScrollActivityTick = Environment.TickCount64;
 
         if (!_arrangeTimer.IsEnabled)
@@ -978,9 +976,9 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     private void ArrangeTimerTick(object? sender, EventArgs e)
     {
-        if (_hasPendingArrange)
+        if (HasPendingArrange)
         {
-            _hasPendingArrange = false;
+            HasPendingArrange = false;
             InvalidateArrange();
         }
 
@@ -992,7 +990,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     private void StopArrangeTimer()
     {
-        _hasPendingArrange = false;
+        HasPendingArrange = false;
 
         if (_arrangeTimer.IsEnabled)
         {
@@ -1032,8 +1030,8 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     {
         var horizontalMode = CanHorizontallyScroll ? ScrollMode.Enabled : ScrollMode.Disabled;
         var verticalMode = CanVerticallyScroll ? ScrollMode.Enabled : ScrollMode.Disabled;
-        SetAndRaise(ComputedHorizontalScrollModeProperty, ref _computedHorizontalScrollMode, horizontalMode);
-        SetAndRaise(ComputedVerticalScrollModeProperty, ref _computedVerticalScrollMode, verticalMode);
+        _ = SetAndRaise(ComputedHorizontalScrollModeProperty, ref _computedHorizontalScrollMode, horizontalMode);
+        _ = SetAndRaise(ComputedVerticalScrollModeProperty, ref _computedVerticalScrollMode, verticalMode);
     }
 
     partial void OnPropertyChangedOverride(AvaloniaPropertyChangedEventArgs change)
@@ -1121,7 +1119,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
             if (!_compositionUpdate && _interactionTracker is not null)
             {
                 var scale = change.GetNewValue<double>();
-                ZoomTo(scale);
+                _ = ZoomTo(scale);
             }
         }
         else if (change.Property == MinZoomFactorProperty)
@@ -1287,7 +1285,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
             GetViewportBounds(requestedElement, out _) &&
             TranslateBounds(requestedElement, Child!, out var requestedBounds))
         {
-            _anchorElement = requestedElement;
+            CurrentAnchor = requestedElement;
             _anchorElementBounds = requestedBounds;
             return;
         }
@@ -1328,15 +1326,15 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
         if (bestCandidate != null)
         {
-            _anchorElement = bestCandidate;
+            CurrentAnchor = bestCandidate;
             _anchorElementBounds = TranslateBounds(bestCandidate, Child!);
         }
     }
 
     private Vector TrackAnchor(bool horizontal, bool vertical)
     {
-        if (_anchorElement is not null &&
-            TranslateBounds(_anchorElement, Child!, out var updatedBounds) &&
+        if (CurrentAnchor is not null &&
+            TranslateBounds(CurrentAnchor, Child!, out var updatedBounds) &&
             updatedBounds != _anchorElementBounds)
         {
             var oldAnchorPoint = GetElementAnchorPoint(_anchorElementBounds, horizontal, vertical);
@@ -1356,7 +1354,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     private void ResetAnchorElement()
     {
-        _anchorElement = null;
+        CurrentAnchor = null;
         _anchorElementBounds = default;
         _isAnchorElementDirty = false;
     }

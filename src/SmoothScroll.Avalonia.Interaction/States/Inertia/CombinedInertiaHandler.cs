@@ -4,7 +4,15 @@ using Avalonia.Utilities;
 
 namespace SmoothScroll.Avalonia.Interaction;
 
-internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
+internal sealed class CombinedInertiaHandler(
+    ServerCompositor compositor,
+    ServerInteractionTracker interactionTracker,
+    Vector3D positionVelocity,
+    double scaleVelocity,
+    Point scaleOrigin,
+    int requestId,
+    bool allowOverscroll)
+    : ServerObject(compositor), IServerClockItem
 {
     private const double PositionStopVelocity = 5;
     private const double ScaleStopVelocity = 0.005;
@@ -12,64 +20,43 @@ internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
     private const double MaxTranslationVelocity = 8000;
     private const double MaxScaleVelocity = 8;
 
-    private readonly ServerInteractionTracker _interactionTracker;
-    private readonly int _requestId;
     private TimeSpan _lastTick;
     private int _stopRequested;
-    private Vector3D _positionVelocity;
-    private double _scaleVelocity;
-    private Point _scaleOrigin;
-    private bool _allowOverscroll;
+    private Point _scaleOrigin = scaleOrigin;
+    private bool _allowOverscroll = allowOverscroll;
     private Vector3D? _modifiedRestingPosition;
     private Vector3D? _modifiedPositionDecayRate;
 
-    public CombinedInertiaHandler(
-        ServerCompositor compositor,
-        ServerInteractionTracker interactionTracker,
-        Vector3D positionVelocity,
-        double scaleVelocity,
-        Point scaleOrigin,
-        int requestId,
-        bool allowOverscroll) : base(compositor)
-    {
-        _interactionTracker = interactionTracker;
-        _positionVelocity = LimitMagnitude(positionVelocity, MaxTranslationVelocity);
-        _scaleVelocity = Math.Clamp(scaleVelocity, -MaxScaleVelocity, MaxScaleVelocity);
-        _scaleOrigin = scaleOrigin;
-        _requestId = requestId;
-        _allowOverscroll = allowOverscroll;
-    }
+    public Vector3D PositionVelocity { get; private set; } = LimitMagnitude(positionVelocity, MaxTranslationVelocity);
 
-    public Vector3D PositionVelocity => _positionVelocity;
-
-    public double ScaleVelocity => _scaleVelocity;
+    public double ScaleVelocity { get; private set; } = Math.Clamp(scaleVelocity, -MaxScaleVelocity, MaxScaleVelocity);
 
     public Vector3D NaturalRestingPosition
     {
         get
         {
-            var decay = GetDecayConstant(_interactionTracker.PositionInertiaDecayRate);
+            var decay = GetDecayConstant(interactionTracker.PositionInertiaDecayRate);
             return new Vector3D(
-                GetNaturalRestingValue(_interactionTracker.Position.X, _positionVelocity.X, decay.X),
-                GetNaturalRestingValue(_interactionTracker.Position.Y, _positionVelocity.Y, decay.Y),
+                GetNaturalRestingValue(interactionTracker.Position.X, PositionVelocity.X, decay.X),
+                GetNaturalRestingValue(interactionTracker.Position.Y, PositionVelocity.Y, decay.Y),
                 0);
         }
     }
 
     public Vector3D ModifiedRestingPosition =>
-        _modifiedRestingPosition is { } position ? Vector3D.Clamp(position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition) : Vector3D.Clamp(NaturalRestingPosition, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+        _modifiedRestingPosition is { } position ? Vector3D.Clamp(position, interactionTracker.MinPosition, interactionTracker.MaxPosition) : Vector3D.Clamp(NaturalRestingPosition, interactionTracker.MinPosition, interactionTracker.MaxPosition);
 
     public double NaturalRestingScale
     {
         get
         {
-            var decay = GetDecayConstant(_interactionTracker.ScaleInertiaDecayRate);
-            return decay > 0 ? _interactionTracker.Scale * Math.Exp(_scaleVelocity / decay) : _interactionTracker.Scale;
+            var decay = GetDecayConstant(interactionTracker.ScaleInertiaDecayRate);
+            return decay > 0 ? interactionTracker.Scale * Math.Exp(ScaleVelocity / decay) : interactionTracker.Scale;
         }
     }
 
     public double ModifiedRestingScale =>
-        Math.Clamp(NaturalRestingScale, _interactionTracker.MinScale, _interactionTracker.MaxScale);
+        Math.Clamp(NaturalRestingScale, interactionTracker.MinScale, interactionTracker.MaxScale);
 
     public void Start()
     {
@@ -90,25 +77,25 @@ internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
     {
         _modifiedRestingPosition = null;
         _modifiedPositionDecayRate = null;
-        _positionVelocity = Vector3D.Dot(_positionVelocity, velocity) < 0 ? velocity : _positionVelocity + velocity;
-        _positionVelocity = LimitMagnitude(_positionVelocity, MaxTranslationVelocity);
+        PositionVelocity = Vector3D.Dot(PositionVelocity, velocity) < 0 ? velocity : PositionVelocity + velocity;
+        PositionVelocity = LimitMagnitude(PositionVelocity, MaxTranslationVelocity);
     }
 
     public void UpdateRestingPosition(Vector3D position)
     {
-        var target = Vector3D.Clamp(position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
-        var current = _interactionTracker.Position;
-        var decay = GetDecayConstant(_interactionTracker.PositionInertiaDecayRate);
+        var target = Vector3D.Clamp(position, interactionTracker.MinPosition, interactionTracker.MaxPosition);
+        var current = interactionTracker.Position;
+        var decay = GetDecayConstant(interactionTracker.PositionInertiaDecayRate);
 
         _modifiedRestingPosition = target;
-        _positionVelocity = LimitMagnitude(new Vector3D(
+        PositionVelocity = LimitMagnitude(new Vector3D(
             (target.X - current.X) * decay.X,
             (target.Y - current.Y) * decay.Y,
             0), MaxTranslationVelocity);
         _modifiedPositionDecayRate = new Vector3D(
-            GetTargetDecayRate(current.X, target.X, _positionVelocity.X),
-            GetTargetDecayRate(current.Y, target.Y, _positionVelocity.Y),
-            _interactionTracker.PositionInertiaDecayRate.Z);
+            GetTargetDecayRate(current.X, target.X, PositionVelocity.X),
+            GetTargetDecayRate(current.Y, target.Y, PositionVelocity.Y),
+            interactionTracker.PositionInertiaDecayRate.Z);
     }
 
     public void ClampRestingPositionToBounds()
@@ -120,43 +107,43 @@ internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
     public void AddScaleImpulse(Point origin, double velocity)
     {
         _scaleOrigin = origin;
-        _scaleVelocity = Math.Sign(_scaleVelocity) != Math.Sign(velocity) ? velocity : _scaleVelocity + velocity;
-        _scaleVelocity = Math.Clamp(_scaleVelocity, -MaxScaleVelocity, MaxScaleVelocity);
+        ScaleVelocity = Math.Sign(ScaleVelocity) != Math.Sign(velocity) ? velocity : ScaleVelocity + velocity;
+        ScaleVelocity = Math.Clamp(ScaleVelocity, -MaxScaleVelocity, MaxScaleVelocity);
     }
 
     public void DisableOverscroll()
     {
         _allowOverscroll = false;
         var clampedPosition = Vector3D.Clamp(
-            _interactionTracker.Position,
-            _interactionTracker.MinPosition,
-            _interactionTracker.MaxPosition);
-        _interactionTracker.SetPosition(clampedPosition, InteractionTrackerValuesChangedArgs.UserRequestId);
+            interactionTracker.Position,
+            interactionTracker.MinPosition,
+            interactionTracker.MaxPosition);
+        interactionTracker.SetPosition(clampedPosition, InteractionTrackerValuesChangedArgs.UserRequestId);
     }
 
     public void ApplyTranslationDelta(Vector delta)
     {
         _modifiedRestingPosition = null;
         _modifiedPositionDecayRate = null;
-        _positionVelocity = new Vector3D(
-            delta.X is 0 ? _positionVelocity.X : 0,
-            delta.Y is 0 ? _positionVelocity.Y : 0,
+        PositionVelocity = new Vector3D(
+            delta.X is 0 ? PositionVelocity.X : 0,
+            delta.Y is 0 ? PositionVelocity.Y : 0,
             0);
         var position = Vector3D.Clamp(
-            _interactionTracker.Position + new Vector3D(delta.X, delta.Y, 0),
-            _interactionTracker.MinPosition,
-            _interactionTracker.MaxPosition);
-        _interactionTracker.SetPosition(position, InteractionTrackerValuesChangedArgs.UserRequestId);
+            interactionTracker.Position + new Vector3D(delta.X, delta.Y, 0),
+            interactionTracker.MinPosition,
+            interactionTracker.MaxPosition);
+        interactionTracker.SetPosition(position, InteractionTrackerValuesChangedArgs.UserRequestId);
     }
 
     public void ApplyScaleDelta(Point origin, double delta)
     {
-        _scaleVelocity = 0;
+        ScaleVelocity = 0;
         var scale = Math.Clamp(
-            _interactionTracker.Scale * delta,
-            _interactionTracker.MinScale,
-            _interactionTracker.MaxScale);
-        _interactionTracker.SetScale(
+            interactionTracker.Scale * delta,
+            interactionTracker.MinScale,
+            interactionTracker.MaxScale);
+        interactionTracker.SetScale(
             scale,
             new Vector3D(origin.X, origin.Y, 0),
             InteractionTrackerValuesChangedArgs.UserRequestId);
@@ -184,61 +171,61 @@ internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
             return;
 
         var finalPosition = Vector3D.Clamp(
-            _interactionTracker.Position,
-            _interactionTracker.MinPosition,
-            _interactionTracker.MaxPosition);
+            interactionTracker.Position,
+            interactionTracker.MinPosition,
+            interactionTracker.MaxPosition);
         if (_modifiedRestingPosition is { } target)
-            finalPosition = Vector3D.Clamp(target, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
-        _interactionTracker.SetPosition(finalPosition, _requestId);
+            finalPosition = Vector3D.Clamp(target, interactionTracker.MinPosition, interactionTracker.MaxPosition);
+        interactionTracker.SetPosition(finalPosition, requestId);
         Stop();
-        _interactionTracker.ChangeState(new IdleState(_interactionTracker, _requestId));
+        interactionTracker.ChangeState(new IdleState(interactionTracker, requestId));
     }
 
     private void StepScale(double elapsed)
     {
-        if (Math.Abs(_scaleVelocity) <= ScaleStopVelocity)
+        if (Math.Abs(ScaleVelocity) <= ScaleStopVelocity)
         {
-            _scaleVelocity = 0;
+            ScaleVelocity = 0;
             return;
         }
 
-        var currentScale = _interactionTracker.Scale;
+        var currentScale = interactionTracker.Scale;
         var scaleLogDelta = GetDecayedDisplacement(
-            _scaleVelocity,
-            _interactionTracker.ScaleInertiaDecayRate,
+            ScaleVelocity,
+            interactionTracker.ScaleInertiaDecayRate,
             elapsed);
         var requestedScale = currentScale * Math.Exp(scaleLogDelta);
-        var scale = Math.Clamp(requestedScale, _interactionTracker.MinScale, _interactionTracker.MaxScale);
-        _interactionTracker.SetScale(scale, new Vector3D(_scaleOrigin.X, _scaleOrigin.Y, 0), _requestId);
+        var scale = Math.Clamp(requestedScale, interactionTracker.MinScale, interactionTracker.MaxScale);
+        interactionTracker.SetScale(scale, new Vector3D(_scaleOrigin.X, _scaleOrigin.Y, 0), requestId);
 
         if (!MathUtilities.AreClose(scale, requestedScale))
-            _scaleVelocity = 0;
+            ScaleVelocity = 0;
         else
-            _scaleVelocity *= GetFrameDecay(_interactionTracker.ScaleInertiaDecayRate, elapsed);
+            ScaleVelocity *= GetFrameDecay(interactionTracker.ScaleInertiaDecayRate, elapsed);
     }
 
     private void StepPosition(double elapsed)
     {
-        var position = _interactionTracker.Position;
-        var decayRate = _modifiedPositionDecayRate ?? _interactionTracker.PositionInertiaDecayRate;
+        var position = interactionTracker.Position;
+        var decayRate = _modifiedPositionDecayRate ?? interactionTracker.PositionInertiaDecayRate;
 
         (var x, var velocityX) = StepAxis(
             position.X,
-            _positionVelocity.X,
-            _interactionTracker.MinPosition.X,
-            _interactionTracker.MaxPosition.X,
+            PositionVelocity.X,
+            interactionTracker.MinPosition.X,
+            interactionTracker.MaxPosition.X,
             decayRate.X,
             elapsed);
         (var y, var velocityY) = StepAxis(
             position.Y,
-            _positionVelocity.Y,
-            _interactionTracker.MinPosition.Y,
-            _interactionTracker.MaxPosition.Y,
+            PositionVelocity.Y,
+            interactionTracker.MinPosition.Y,
+            interactionTracker.MaxPosition.Y,
             decayRate.Y,
             elapsed);
 
-        _positionVelocity = new Vector3D(velocityX, velocityY, 0);
-        _interactionTracker.SetPosition(new Vector3D(x, y, 0), _requestId);
+        PositionVelocity = new Vector3D(velocityX, velocityY, 0);
+        interactionTracker.SetPosition(new Vector3D(x, y, 0), requestId);
     }
 
     private (double Position, double Velocity) StepAxis(
@@ -249,7 +236,7 @@ internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
         double decayRate,
         double elapsed)
     {
-        if (!_allowOverscroll || _interactionTracker.OverscrollElasticity <= 0)
+        if (!_allowOverscroll || interactionTracker.OverscrollElasticity <= 0)
         {
             var next = Math.Clamp(
                 position + GetDecayedDisplacement(velocity, decayRate, elapsed),
@@ -265,7 +252,7 @@ internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
         if (position < minimum || position > maximum)
         {
             var target = Math.Clamp(position, minimum, maximum);
-            var angularFrequency = 14 * _interactionTracker.OverscrollBounceRate;
+            var angularFrequency = 14 * interactionTracker.OverscrollBounceRate;
             var displacement = position - target;
             var acceleration = (-2 * angularFrequency * velocity)
                                - (angularFrequency * angularFrequency * displacement);
@@ -282,28 +269,28 @@ internal sealed class CombinedInertiaHandler : ServerObject, IServerClockItem
     private bool HasCompleted()
     {
         var clamped = Vector3D.Clamp(
-            _interactionTracker.Position,
-            _interactionTracker.MinPosition,
-            _interactionTracker.MaxPosition);
-        var atBoundary = Vector3D.Distance(_interactionTracker.Position, clamped) <= BoundaryTolerance;
-        return _positionVelocity.Length <= PositionStopVelocity
-               && Math.Abs(_scaleVelocity) <= ScaleStopVelocity
+            interactionTracker.Position,
+            interactionTracker.MinPosition,
+            interactionTracker.MaxPosition);
+        var atBoundary = Vector3D.Distance(interactionTracker.Position, clamped) <= BoundaryTolerance;
+        return PositionVelocity.Length <= PositionStopVelocity
+               && Math.Abs(ScaleVelocity) <= ScaleStopVelocity
                && atBoundary;
     }
 
     private void CompleteModifiedPositionIfNeeded()
     {
         if (_modifiedRestingPosition is not { } target
-            || _positionVelocity.Length > PositionStopVelocity)
+            || PositionVelocity.Length > PositionStopVelocity)
         {
             return;
         }
 
-        target = Vector3D.Clamp(target, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+        target = Vector3D.Clamp(target, interactionTracker.MinPosition, interactionTracker.MaxPosition);
         _modifiedRestingPosition = target;
         _modifiedPositionDecayRate = null;
-        _positionVelocity = default;
-        _interactionTracker.SetPosition(target, _requestId);
+        PositionVelocity = default;
+        interactionTracker.SetPosition(target, requestId);
     }
 
     private static double GetTargetDecayRate(double current, double target, double velocity)

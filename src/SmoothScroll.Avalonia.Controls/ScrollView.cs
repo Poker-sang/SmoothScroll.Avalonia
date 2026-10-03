@@ -280,8 +280,6 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     /// </summary>
     public static readonly RoutedEvent<ZoomChangedEventArgs> ZoomChangedEvent =
         RoutedEvent.Register<ScrollView, ZoomChangedEventArgs>(nameof(ZoomChanged), RoutingStrategies.Bubble);
-
-    private ScrollPresenter? _presenter;
     private ScrollBar? _horizontalScrollBar;
     private ScrollBar? _verticalScrollBar;
     private Size _extent;
@@ -416,8 +414,8 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     /// </summary>
     public ScrollPresenter? ScrollPresenter
     {
-        get => _presenter;
-        private set => SetAndRaise(ScrollPresenterProperty, ref _presenter, value);
+        get;
+        private set => SetAndRaise(ScrollPresenterProperty, ref field, value);
     }
 
     /// <summary>
@@ -692,7 +690,7 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
         set
         {
             ArgumentNullException.ThrowIfNull(value);
-            SetAndRaise(GestureBindingsProperty, ref field, value);
+            _ = SetAndRaise(GestureBindingsProperty, ref field, value);
         }
     } = ScrollGestureBindings.CreateDefault();
 
@@ -787,7 +785,7 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     /// Reading this property does not start anchor selection. It is <see langword="null"/> before a candidate is
     /// selected and while anchoring is satisfied directly by the near or far extent boundary.
     /// </remarks>
-    public Control? CurrentAnchor => (_presenter as IScrollAnchorProvider)?.CurrentAnchor;
+    public Control? CurrentAnchor => (ScrollPresenter as IScrollAnchorProvider)?.CurrentAnchor;
 
     /// <summary>
     /// Scrolls to a logical offset.
@@ -805,7 +803,7 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     public int ScrollTo(Vector offset, bool isAnimated = true)
     {
         offset = ClampOffsetToEnabledAxes(offset);
-        if (_presenter is { } presenter)
+        if (ScrollPresenter is { } presenter)
             return presenter.ScrollTo(offset, isAnimated, ScrollChangeSource.Programmatic);
 
         return SetOffset(offset, ScrollChangeSource.Programmatic);
@@ -868,10 +866,10 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     {
         ValidateZoomCenter(centerPoint);
 
-        if (_presenter is null)
+        if (ScrollPresenter is null)
             return SetZoomFactor(zoomFactor, ScrollChangeSource.Programmatic);
 
-        return _presenter.ZoomTo(
+        return ScrollPresenter.ZoomTo(
             zoomFactor,
             centerPoint,
             isAnimated,
@@ -911,10 +909,10 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     {
         ValidateZoomCenter(centerPoint);
 
-        if (_presenter is null)
+        if (ScrollPresenter is null)
             return SetZoomFactor(ZoomFactor + zoomFactorDelta, ScrollChangeSource.Programmatic);
 
-        return _presenter.ZoomBy(zoomFactorDelta, centerPoint, isAnimated);
+        return ScrollPresenter.ZoomBy(zoomFactorDelta, centerPoint, isAnimated);
     }
 
     /// <summary>
@@ -925,14 +923,14 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     /// Registration is forwarded to the active presenter. It has no effect before the control template is applied.
     /// </remarks>
     public void RegisterAnchorCandidate(Control element) =>
-        (_presenter as IScrollAnchorProvider)?.RegisterAnchorCandidate(element);
+        (ScrollPresenter as IScrollAnchorProvider)?.RegisterAnchorCandidate(element);
 
     /// <summary>
     /// Removes a previously registered layout anchor candidate.
     /// </summary>
     /// <param name="element">The candidate control to remove.</param>
     public void UnregisterAnchorCandidate(Control element) =>
-        (_presenter as IScrollAnchorProvider)?.UnregisterAnchorCandidate(element);
+        (ScrollPresenter as IScrollAnchorProvider)?.UnregisterAnchorCandidate(element);
 
     protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
     {
@@ -943,8 +941,8 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
         _horizontalScrollBar = e.NameScope.Find<ScrollBar>("PART_HorizontalScrollBar");
         _verticalScrollBar = e.NameScope.Find<ScrollBar>("PART_VerticalScrollBar");
 
-        if (_presenter is not null)
-            _presenter.AttachToScrollView(this);
+        if (ScrollPresenter is not null)
+            ScrollPresenter.AttachToScrollView(this);
 
         if (_horizontalScrollBar is not null)
         {
@@ -992,7 +990,7 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
                 var context = _offsetChangeContext;
                 _offsetChangeContext = null;
                 var source = context?.Source ?? ScrollChangeSource.Programmatic;
-                var correlationId = _presenter?.SetOffsetFromOwner(
+                var correlationId = ScrollPresenter?.SetOffsetFromOwner(
                     change.GetOldValue<Vector>(),
                     change.GetNewValue<Vector>(),
                     source)
@@ -1005,7 +1003,7 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
                     context.CorrelationId = correlationId;
 
                 RaiseScrollChanged(source);
-                if (_presenter is null)
+                if (ScrollPresenter is null)
                     CompleteScrollOperation(correlationId, ScrollingOperationResult.Completed);
             }
         }
@@ -1016,7 +1014,7 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
                 var context = _zoomChangeContext;
                 _zoomChangeContext = null;
                 var source = context?.Source ?? ScrollChangeSource.Programmatic;
-                var correlationId = _presenter?.ZoomTo(
+                var correlationId = ScrollPresenter?.ZoomTo(
                     change.GetNewValue<double>(),
                     centerPoint: null,
                     isAnimated: false,
@@ -1031,13 +1029,13 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
                     context.CorrelationId = correlationId;
 
                 RaiseZoomChanged(source);
-                if (_presenter is null)
+                if (ScrollPresenter is null)
                     CompleteZoomOperation(correlationId, ScrollingOperationResult.Completed);
             }
         }
         else if (change.Property == GestureBindingsProperty || IsInteractionConfigurationProperty(change.Property))
         {
-            _presenter?.UpdateOwnerConfiguration(this);
+            ScrollPresenter?.UpdateOwnerConfiguration(this);
             if (IsScrollModeProperty(change.Property))
             {
                 UpdateCalculatedProperties();
@@ -1069,12 +1067,12 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
         try
         {
             _updatingFromPresenter = true;
-            SetAndRaise(ExtentProperty, ref _extent, extent);
-            SetAndRaise(LogicalExtentProperty, ref _logicalExtent, logicalExtent);
-            SetAndRaise(ViewportProperty, ref _viewport, viewport);
+            _ = SetAndRaise(ExtentProperty, ref _extent, extent);
+            _ = SetAndRaise(LogicalExtentProperty, ref _logicalExtent, logicalExtent);
+            _ = SetAndRaise(ViewportProperty, ref _viewport, viewport);
             UpdateCalculatedProperties();
             SetCurrentValue(OffsetProperty, offset);
-            SetAndRaise(ZoomFactorProperty, ref _zoomFactor, zoomFactor);
+            _ = SetAndRaise(ZoomFactorProperty, ref _zoomFactor, zoomFactor);
         }
         finally
         {
@@ -1132,7 +1130,7 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
         try
         {
             _zoomChangeContext = context;
-            SetAndRaise(ZoomFactorProperty, ref _zoomFactor, zoomFactor);
+            _ = SetAndRaise(ZoomFactorProperty, ref _zoomFactor, zoomFactor);
             return context.CorrelationId;
         }
         finally
@@ -1151,9 +1149,9 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
             horizontalMode is ScrollMode.Enabled ? horizontalOverflow : 0,
             verticalMode is ScrollMode.Enabled ? verticalOverflow : 0);
 
-        SetAndRaise(ComputedHorizontalScrollModeProperty, ref _computedHorizontalScrollMode, horizontalMode);
-        SetAndRaise(ComputedVerticalScrollModeProperty, ref _computedVerticalScrollMode, verticalMode);
-        SetAndRaise(ScrollBarMaximumProperty, ref _scrollBarMaximum, maximum);
+        _ = SetAndRaise(ComputedHorizontalScrollModeProperty, ref _computedHorizontalScrollMode, horizontalMode);
+        _ = SetAndRaise(ComputedVerticalScrollModeProperty, ref _computedVerticalScrollMode, verticalMode);
+        _ = SetAndRaise(ScrollBarMaximumProperty, ref _scrollBarMaximum, maximum);
         CoerceValue(OffsetProperty);
     }
 
@@ -1165,11 +1163,11 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
         var verticalVisibility = ResolveComputedScrollBarVisibility(
             VerticalScrollBarVisibility,
             ComputedVerticalScrollMode is ScrollMode.Enabled);
-        SetAndRaise(
+        _ = SetAndRaise(
             ComputedHorizontalScrollBarVisibilityProperty,
             ref _computedHorizontalScrollBarVisibility,
             horizontalVisibility);
-        SetAndRaise(
+        _ = SetAndRaise(
             ComputedVerticalScrollBarVisibilityProperty,
             ref _computedVerticalScrollBarVisibility,
             verticalVisibility);
@@ -1210,13 +1208,13 @@ public sealed partial class ScrollView : ContentControl, IScrollable, IScrollAnc
     private void UpdateExpandedState()
     {
         var expanded = _horizontalScrollBar?.IsExpanded is true || _verticalScrollBar?.IsExpanded is true;
-        SetAndRaise(IsExpandedProperty, ref _isExpanded, expanded);
+        _ = SetAndRaise(IsExpandedProperty, ref _isExpanded, expanded);
     }
 
     private void DetachTemplateParts()
     {
-        if (_presenter is not null)
-            _presenter.DetachFromScrollView(this);
+        if (ScrollPresenter is not null)
+            ScrollPresenter.DetachFromScrollView(this);
 
         if (_horizontalScrollBar is not null)
         {

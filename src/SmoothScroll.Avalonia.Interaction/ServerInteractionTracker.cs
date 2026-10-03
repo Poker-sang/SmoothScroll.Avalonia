@@ -28,13 +28,13 @@ internal partial class ServerInteractionTracker
 
     partial void OnFieldsDeserialized(InteractionTrackerChangedFields changed)
     {
-        const InteractionTrackerChangedFields BoundsFields =
+        const InteractionTrackerChangedFields boundsFields =
             InteractionTrackerChangedFields.MinPosition
             | InteractionTrackerChangedFields.MinPositionAnimated
             | InteractionTrackerChangedFields.MaxPosition
             | InteractionTrackerChangedFields.MaxPositionAnimated;
 
-        if ((changed & BoundsFields) is not 0)
+        if ((changed & boundsFields) is not 0)
             State.ReceiveBoundsUpdate();
     }
 
@@ -106,7 +106,7 @@ internal partial class ServerInteractionTracker
 
     internal void ChangeState(InteractionTrackerState newState)
     {
-        Interlocked.Increment(ref _count);
+        _ = Interlocked.Increment(ref _count);
         WriteStateTransition(_count, _state?.Name ?? "<none>", newState.Name);
         _state = newState;
     }
