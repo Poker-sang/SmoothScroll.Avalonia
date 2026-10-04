@@ -5,14 +5,10 @@ namespace SmoothScroll.Avalonia.Interaction;
 
 internal sealed class InteractingState : InteractionTrackerState
 {
-    private const double ReferenceRange = 2000;
-    private const double Tension = 0.5;
-
     internal override string Name => "InteractingState";
 
     private double _previousScale;
     private Point _previousOrigin;
-    private Vector3D _position;
     private TimeSpan _previousScaleTimestamp;
     private double _scaleVelocity;
     private Point _scaleOrigin;
@@ -23,7 +19,7 @@ internal sealed class InteractingState : InteractionTrackerState
     {
         _allowOverscroll = allowOverscroll;
         _previousScale = interactionTracker.Scale;
-        _position = GetOriginalPoint(interactionTracker.Position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+        _interactionTracker.SyncManipulationPosition();
         EnterState();
     }
 
@@ -58,7 +54,7 @@ internal sealed class InteractingState : InteractionTrackerState
         }
 
         _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId: 0));
-        _interactionTracker.NotifyExperimentalIdle(Experimental.ExperimentalScrollMovementSource.Direct);
+        _interactionTracker.NotifyScrollIdle(ScrollMovementSource.Direct);
     }
 
     internal override void AddScaleVelocity(Point origin, double scaleDelta, bool useInertia)
@@ -85,106 +81,31 @@ internal sealed class InteractingState : InteractionTrackerState
 
         _scaleOrigin = origin;
 
-        var currentPosition = _position;
-        var positionChanged = false;
         var isOriginBaseline = !useInertia && scaleDelta is 1;
-        if (_hasPreviousOrigin && !isOriginBaseline)
-            currentPosition = ApplyOriginTranslation(origin, _position, out positionChanged);
+        var originDelta = _hasPreviousOrigin && _previousOrigin != default && !isOriginBaseline
+            ? origin - _previousOrigin : default;
+        if (originDelta != default)
+            _interactionTracker.ApplyScrollDelta(new Vector3D(-(float)originDelta.X, -(float)originDelta.Y, 0),
+                ScrollMovementSource.Direct, 0, _allowOverscroll, isManipulation: true);
 
-        var targetScale = _previousScale * scaleDelta;
-        var clampedScale = Math.Clamp(targetScale, _interactionTracker.MinScale, _interactionTracker.MaxScale);
-        var scaleChanged = Math.Abs(clampedScale - _previousScale) > double.Epsilon;
-
-        _position = currentPosition;
-
-        if (positionChanged)
+        var clampedScale = Math.Clamp(_previousScale * scaleDelta, _interactionTracker.MinScale, _interactionTracker.MaxScale);
+        if (Math.Abs(clampedScale - _previousScale) > double.Epsilon)
         {
-            UpdateTrackerPosition(_position);
+            _interactionTracker.SetScale(clampedScale, new Vector3D(origin.X, origin.Y, 0), 0);
+            _previousScale = clampedScale;
         }
-
-        if (scaleChanged)
-        {
-            ApplyScale(origin, clampedScale, currentPosition);
-        }
-        else if (!positionChanged)
-        {
-            UpdateTrackerPosition(_position);
-        }
+        else if (originDelta == default)
+            _interactionTracker.ApplyScrollDelta(default, ScrollMovementSource.Direct, 0,
+                _allowOverscroll, isManipulation: true);
 
         _previousOrigin = origin;
         _hasPreviousOrigin = true;
     }
 
-    internal override void ApplyManipulationDelta(Vector translationDelta)
-    {
-        if (_interactionTracker.HasExperimentalVerticalScroll)
-        {
-            _interactionTracker.ApplyExperimentalHorizontalInput(translationDelta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
-            _interactionTracker.ApplyExperimentalInput(translationDelta.Y, Experimental.ExperimentalScrollMovementSource.Direct, InteractionTrackerValuesChangedArgs.UserRequestId);
-            _position = _interactionTracker.Position;
-            return;
-        }
-        _position += new Vector3D((float)translationDelta.X, (float)translationDelta.Y, 0);
-        UpdateTrackerPosition(_position);
-    }
-
-    private Vector3D ApplyOriginTranslation(Point origin, Vector3D position, out bool positionChanged)
-    {
-        positionChanged = false;
-
-        if (_previousOrigin == default)
-        {
-            return position;
-        }
-
-        var originDelta = origin - _previousOrigin;
-        if (originDelta == default)
-        {
-            return position;
-        }
-
-        positionChanged = true;
-
-        return new Vector3D(
-            position.X - (float)originDelta.X,
-            position.Y - (float)originDelta.Y,
-            position.Z);
-    }
-
-    private void ApplyScale(Point origin, double scale, Vector3D position)
-    {
-        _position = ScalePosition(position, origin, scale / _previousScale);
-        _interactionTracker.SetScale(scale, new Vector3D(origin.X, origin.Y, 0), 0);
-        _previousScale = scale;
-    }
-
-    private static Vector3D ScalePosition(Vector3D position, Point origin, double scaleRatio)
-    {
-        var deltaX = (origin.X + position.X) * (1 - scaleRatio);
-        var deltaY = (origin.Y + position.Y) * (1 - scaleRatio);
-
-        return new Vector3D(
-            position.X - deltaX,
-            position.Y - deltaY,
-            position.Z);
-    }
-
-    private void SyncPositionFromTracker()
-    {
-        _position = GetOriginalPoint(_interactionTracker.Position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
-    }
-
-    private void UpdateTrackerPosition(Vector3D position)
-    {
-        var modifiedPosition = _allowOverscroll ?
-            GetElasticPoint(
-                position,
-                _interactionTracker.MinPosition,
-                _interactionTracker.MaxPosition,
-                _interactionTracker.OverscrollElasticity) :
-            Vector3D.Clamp(position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
-        _interactionTracker.SetPosition(modifiedPosition, requestId: 0);
-    }
+    internal override void ApplyManipulationDelta(Vector translationDelta) =>
+        _interactionTracker.ApplyScrollDelta(new Vector3D(translationDelta.X, translationDelta.Y, 0),
+            ScrollMovementSource.Direct, InteractionTrackerValuesChangedArgs.UserRequestId,
+            _allowOverscroll, isManipulation: true);
 
     internal override void StartInertia(Vector linearVelocity, bool includeScaleVelocity)
     {
@@ -199,13 +120,6 @@ internal sealed class InteractingState : InteractionTrackerState
 
     internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
-        if (_interactionTracker.HasExperimentalVerticalScroll && !useInertia)
-        {
-            _interactionTracker.ApplyExperimentalHorizontalInput(delta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
-            _interactionTracker.ApplyExperimentalInput(delta.Y, Experimental.ExperimentalScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
-            _position = _interactionTracker.Position;
-            return;
-        }
         if (useInertia)
         {
             // Wheel input can arrive before the pointer release reaches the composition thread.
@@ -218,12 +132,8 @@ internal sealed class InteractingState : InteractionTrackerState
             return;
         }
 
-        _position += new Vector3D(delta.X, delta.Y, 0);
-        _position = Vector3D.Clamp(
-            _position,
-            _interactionTracker.MinPosition,
-            _interactionTracker.MaxPosition);
-        _interactionTracker.SetPosition(_position, InteractionTrackerValuesChangedArgs.UserRequestId);
+        _interactionTracker.ApplyScrollDelta(new Vector3D(delta.X, delta.Y, 0),
+            ScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
     }
 
     internal override void TryUpdatePositionWithAdditionalVelocity(Vector3D velocityInPixelsPerSecond, int requestId)
@@ -243,7 +153,7 @@ internal sealed class InteractingState : InteractionTrackerState
 
     internal override void ReceiveBoundsUpdate()
     {
-        SyncPositionFromTracker();
+        _interactionTracker.SyncManipulationPosition();
     }
 
     private double GetScaleReleaseVelocity()
@@ -255,134 +165,4 @@ internal sealed class InteractingState : InteractionTrackerState
         return idleSeconds >= 0.12 ? 0 : _scaleVelocity * (1 - (idleSeconds / 0.12));
     }
 
-    public static Vector3D GetElasticPoint(Vector3D current, Vector3D min, Vector3D max, double tension = Tension)
-    {
-        return new Vector3D(
-            GetElasticCoordinate(current.X, min.X, max.X, tension),
-            GetElasticCoordinate(current.Y, min.Y, max.Y, tension),
-            GetElasticCoordinate(current.Z, min.Z, max.Z, tension));
-    }
-
-    private static double GetElasticCoordinate(double current, double min, double max, double tension)
-    {
-        (min, max) = GetOrderedBounds(min, max);
-
-        if (double.IsNaN(current))
-        {
-            return min;
-        }
-
-        if (current < min)
-        {
-            return min - CalculateOffset(min - current, tension);
-        }
-
-        if (current > max)
-        {
-            return max + CalculateOffset(current - max, tension);
-        }
-
-        return current;
-    }
-
-    public static Vector3D GetOriginalPoint(Vector3D elasticPoint, Vector3D min, Vector3D max, double tension = Tension)
-    {
-        return new Vector3D(
-            GetOriginalCoordinate(elasticPoint.X, min.X, max.X, tension),
-            GetOriginalCoordinate(elasticPoint.Y, min.Y, max.Y, tension),
-            GetOriginalCoordinate(elasticPoint.Z, min.Z, max.Z, tension));
-    }
-
-    private static double GetOriginalCoordinate(double elasticPoint, double min, double max, double tension)
-    {
-        (min, max) = GetOrderedBounds(min, max);
-
-        if (elasticPoint < min)
-        {
-            var offset = CalculateInverseOffset(min - elasticPoint, tension);
-            return SubtractWithSaturation(min, offset);
-        }
-
-        if (elasticPoint > max)
-        {
-            var offset = CalculateInverseOffset(elasticPoint - max, tension);
-            return AddWithSaturation(max, offset);
-        }
-
-        return double.IsNaN(elasticPoint) ? min : elasticPoint;
-    }
-
-    private static (double Min, double Max) GetOrderedBounds(double min, double max)
-    {
-        var minIsNaN = double.IsNaN(min);
-        var maxIsNaN = double.IsNaN(max);
-
-        if (minIsNaN && maxIsNaN)
-        {
-            return (0, 0);
-        }
-
-        if (minIsNaN)
-        {
-            min = max;
-        }
-
-        if (maxIsNaN)
-        {
-            max = min;
-        }
-
-        return min <= max ? (min, max) : (max, min);
-    }
-
-    private static double CalculateOffset(double distance, double tension)
-    {
-        if (distance <= 0 || tension <= 0 || double.IsNaN(distance) || double.IsNaN(tension))
-        {
-            return 0;
-        }
-
-        if (double.IsPositiveInfinity(distance))
-        {
-            return ReferenceRange * tension;
-        }
-
-        return (distance / (distance + ReferenceRange)) * ReferenceRange * tension;
-    }
-
-    private static double CalculateInverseOffset(double resultOffset, double tension)
-    {
-        if (resultOffset <= 0 || tension <= 0 || double.IsNaN(resultOffset) || double.IsNaN(tension))
-        {
-            return 0;
-        }
-
-        double limit = ReferenceRange * tension;
-
-        if (limit <= 0 || double.IsNaN(limit) || double.IsPositiveInfinity(resultOffset) || resultOffset >= limit)
-        {
-            return double.MaxValue;
-        }
-
-        var denominator = limit / resultOffset - 1.0;
-        if (denominator <= 0 || double.IsNaN(denominator))
-        {
-            return double.MaxValue;
-        }
-
-        var offset = ReferenceRange / denominator;
-        return double.IsNaN(offset) || double.IsInfinity(offset) ? double.MaxValue : offset;
-    }
-
-    private static double AddWithSaturation(double value, double offset)
-    {
-        var result = value + offset;
-        return double.IsNaN(result) || double.IsPositiveInfinity(result) ? double.MaxValue : result;
-    }
-
-    private static double SubtractWithSaturation(double value, double offset)
-    {
-        var result = value - offset;
-        return double.IsNaN(result) || double.IsNegativeInfinity(result) ? double.MinValue : result;
-    }
 }

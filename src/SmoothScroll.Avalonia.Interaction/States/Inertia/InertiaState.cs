@@ -21,7 +21,6 @@ internal sealed class InertiaState : InteractionTrackerState
     {
         _requestId = requestId;
         _handler = new CombinedInertiaHandler(
-            interactionTracker.Compositor,
             interactionTracker,
             positionVelocity,
             scaleVelocity,

@@ -99,13 +99,6 @@ internal sealed class CustomAnimationState : InteractionTrackerState
     internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
         _animationHandler.Stop();
-        if (_interactionTracker.HasExperimentalVerticalScroll && !useInertia)
-        {
-            _interactionTracker.ApplyExperimentalHorizontalInput(delta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
-            _interactionTracker.ApplyExperimentalInput(delta.Y, Experimental.ExperimentalScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
-            _interactionTracker.ChangeState(new IdleState(_interactionTracker, InteractionTrackerValuesChangedArgs.UserRequestId));
-            return;
-        }
         if (useInertia)
         {
             var velocity = delta / 0.25;
@@ -118,13 +111,8 @@ internal sealed class CustomAnimationState : InteractionTrackerState
         }
         else
         {
-            var position = Vector3D.Clamp(
-                _interactionTracker.Position + new Vector3D(delta.X, delta.Y, 0),
-                _interactionTracker.MinPosition,
-                _interactionTracker.MaxPosition);
-            _interactionTracker.SetPosition(
-                position,
-                InteractionTrackerValuesChangedArgs.UserRequestId);
+            _interactionTracker.ApplyScrollDelta(new Vector3D(delta.X, delta.Y, 0),
+                ScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
             _interactionTracker.ChangeState(new IdleState(
                 _interactionTracker,
                 InteractionTrackerValuesChangedArgs.UserRequestId));

@@ -609,8 +609,10 @@ public sealed class ScrollViewHeadlessTests
         };
         host.View.StateChanged += (_, _) => states.Add(host.View.State);
 
+        // Queue the replacement before capturing frames: a capture can advance beyond
+        // the first operation's 300ms duration, especially during compositor startup.
         var scrollId = host.View.ScrollTo(new Vector(700, 500), isAnimated: true);
-        _ = host.Render();
+        Assert.Empty(scrollCompletions);
         var zoomId = host.View.ZoomTo(2, isAnimated: true);
 
         for (var i = 0; i < 50; i++)
@@ -639,7 +641,7 @@ public sealed class ScrollViewHeadlessTests
         host.View.ScrollCompleted += (_, args) => completions.Add(args);
 
         var firstId = host.View.ScrollTo(new Vector(700, 500), isAnimated: true);
-        _ = host.Render();
+        Assert.Empty(completions);
         var secondId = host.View.ScrollTo(new Vector(100, 200), isAnimated: true);
 
         for (var i = 0; i < 50; i++)

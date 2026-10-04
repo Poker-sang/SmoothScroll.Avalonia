@@ -4,7 +4,7 @@ using Avalonia.Rendering.Composition.Server;
 using Avalonia.Rendering.Composition.Transport;
 using Avalonia.Threading;
 
-namespace SmoothScroll.Avalonia.Interaction.Experimental;
+namespace SmoothScroll.Avalonia.Composition;
 
 /// <summary>Initial evaluation support for invalidation-driven composition expressions.</summary>
 public static class CompositionAnimationExtensions

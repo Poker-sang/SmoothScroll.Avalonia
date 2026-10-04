@@ -3,7 +3,7 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Server;
 using Avalonia.Threading;
 
-namespace SmoothScroll.Avalonia.Interaction.Experimental;
+namespace SmoothScroll.Avalonia.Composition;
 
 /// <summary>Compositor-owned color output, exposed as <c>output.Value</c> to expressions.</summary>
 /// <remarks>Capture Writer on the UI thread and use it exclusively from this compositor's callbacks.</remarks>

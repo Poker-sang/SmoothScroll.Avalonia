@@ -186,6 +186,9 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     private ScrollMode _computedHorizontalScrollMode = ScrollMode.Disabled;
     private ScrollMode _computedVerticalScrollMode = ScrollMode.Disabled;
     private ScrollingInteractionState _interactionState;
+    private VerticalScrollAttachment? _verticalScrollAttachment;
+    private bool _presenterLoaded;
+
 
     /// <summary>
     /// Gets whether content scrolling is delegated to an <see cref="ILogicalScrollable"/> implementation.
@@ -466,6 +469,9 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     Control? IScrollAnchorProvider.CurrentAnchor => CurrentAnchor;
 
+    /// <summary>Whether the presenter is using physical content offsets rather than logical item offsets.</summary>
+    public bool IsPhysicalScrollActive => !IsLogicalScrollActive;
+
     /// <summary>
     /// Registers a visual descendant as an automatic anchor candidate.
     /// </summary>
@@ -611,8 +617,8 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        _experimentalPresenterLoaded = false;
-        UpdateExperimentalAttachment();
+        _presenterLoaded = false;
+        UpdateVerticalScrollAttachment();
         var compositionVisual = GetCompositionVisual();
         InterruptOperations();
         SetInteractionState(ScrollingInteractionState.Idle);
@@ -623,9 +629,9 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     protected override void OnLoaded(RoutedEventArgs e)
     {
-        _experimentalPresenterLoaded = true;
+        _presenterLoaded = true;
         Initialize();
-        UpdateExperimentalAttachment();
+        UpdateVerticalScrollAttachment();
         base.OnLoaded(e);
     }
 
@@ -686,7 +692,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     private void DisposeInteractionTracker()
     {
-        _experimentalAttachment?.Detach();
+        _verticalScrollAttachment?.Detach();
         InterruptOperations();
         SetInteractionState(ScrollingInteractionState.Idle);
         _interactionSource?.Dispose();
@@ -1085,7 +1091,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
             {
                 // Live participant bounds own geometry correction. Native mirrors can temporarily
                 // have older viewport data; do not send their coercion back as absolute input.
-                _compositionUpdate |= _experimentalAttachment?.IsAttached == true;
+                _compositionUpdate |= _verticalScrollAttachment?.IsAttached == true;
                 OnExtentChanged(change.GetNewValue<Size>());
                 if (!_scaleChanged)
                     CoerceValue(OffsetProperty);
@@ -1097,7 +1103,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
             var previousCompositionUpdate = _compositionUpdate;
             try
             {
-                _compositionUpdate |= _experimentalAttachment?.IsAttached == true;
+                _compositionUpdate |= _verticalScrollAttachment?.IsAttached == true;
                 OnViewportChanged(change.GetNewValue<Size>());
                 CoerceValue(OffsetProperty);
             }
@@ -1259,7 +1265,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
         if (wasLogicalScrollActive == IsLogicalScrollActive)
             return;
 
-        UpdateExperimentalAttachment();
+        UpdateVerticalScrollAttachment();
 
         var compositionVisual = GetCompositionVisual();
         ClearScrollAnimation(compositionVisual);
@@ -1933,7 +1939,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
         _interactionSource.PositionXSourceMode = CanHorizontallyScroll ? sourceMode : InteractionSourceMode.Disabled;
 
-        _interactionSource.PositionYSourceMode = CanVerticallyScroll || _experimentalAttachment?.IsAttached == true
+        _interactionSource.PositionYSourceMode = CanVerticallyScroll || _verticalScrollAttachment?.IsAttached == true
             ? sourceMode : InteractionSourceMode.Disabled;
     }
 
@@ -2074,11 +2080,6 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
         var scrollAnimation = compositionVisual.Compositor.CreateExpressionAnimation();
         scrollAnimation.Expression =
             "Vector3(Margin.X, Margin.Y, 0) - Vector3(Tracker.Position.X, Tracker.Position.Y, Tracker.Position.Z) + Vector3(this.Target.Offset.X, this.Target.Offset.Y, this.Target.Offset.Z)";
-        if (_experimentalContentTranslation is not null)
-        {
-            scrollAnimation.Expression += " + ContentTranslation.Value";
-            scrollAnimation.SetReferenceParameter("ContentTranslation", _experimentalContentTranslation);
-        }
         scrollAnimation.Target = "Translation";
         scrollAnimation.SetReferenceParameter("Tracker", _interactionTracker!);
 
@@ -2138,7 +2139,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
         _interactionSource.ScaleSourceMode = IsZoomEnabled ? sourceMode : InteractionSourceMode.Disabled;
         _interactionSource.PositionXSourceMode = CanHorizontallyScroll ? sourceMode : InteractionSourceMode.Disabled;
-        _interactionSource.PositionYSourceMode = CanVerticallyScroll || _experimentalAttachment?.IsAttached == true
+        _interactionSource.PositionYSourceMode = CanVerticallyScroll || _verticalScrollAttachment?.IsAttached == true
             ? sourceMode : InteractionSourceMode.Disabled;
         _interactionSource.GestureBindings = GestureBindings;
         _interactionSource.ScrollInputMultiplier = ScrollInputMultiplier;
@@ -2415,4 +2416,65 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     //    return _scrollPropertiesSource;
     //}
+
+
+    /// <summary>
+    /// Attaches a compositor participant when this presenter is loaded and physically scrolling.
+    /// The returned registration owns the attachment across reloads and logical mode changes.
+    /// The callback and its returned disposal run on the UI thread. Detach the participant before disposing outputs.
+    /// </summary>
+    public IDisposable AttachVerticalScroll(Func<InteractionTracker, IDisposable> attach)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        ArgumentNullException.ThrowIfNull(attach);
+        if (_verticalScrollAttachment is not null)
+            throw new InvalidOperationException("A vertical scroll attachment is already registered.");
+        var registration = new VerticalScrollAttachment(this, attach);
+        _verticalScrollAttachment = registration;
+        UpdateVerticalScrollAttachment();
+        return registration;
+    }
+
+    private void UpdateVerticalScrollAttachment()
+    {
+        if (_presenterLoaded && IsPhysicalScrollActive && _interactionTracker is not null)
+            _verticalScrollAttachment?.Attach(_interactionTracker);
+        else
+            _verticalScrollAttachment?.Detach();
+        UpdateInteractionOptions();
+    }
+
+    private sealed class VerticalScrollAttachment(ScrollPresenter owner,
+        Func<InteractionTracker, IDisposable> attach) : IDisposable
+    {
+        private InteractionTracker? _tracker;
+        private IDisposable? _attachment;
+        internal bool IsAttached => _attachment is not null;
+
+        internal void Attach(InteractionTracker tracker)
+        {
+            if (ReferenceEquals(tracker, _tracker))
+                return;
+            Detach();
+            _tracker = tracker;
+            _attachment = attach(tracker);
+        }
+
+        internal void Detach()
+        {
+            _attachment?.Dispose();
+            _attachment = null;
+            _tracker = null;
+        }
+
+        public void Dispose()
+        {
+            Dispatcher.UIThread.VerifyAccess();
+            if (!ReferenceEquals(owner._verticalScrollAttachment, this))
+                return;
+            Detach();
+            owner._verticalScrollAttachment = null;
+            owner.UpdateInteractionOptions();
+        }
+    }
 }

@@ -94,8 +94,8 @@ public sealed class InputElementInteractionSource : IDisposable
     private bool ShouldAutoScrollVertically =>
         PositionYSourceMode is not InteractionSourceMode.Disabled
         && (HasVerticalScrollRange || !HasHorizontalScrollRange
-            || _tracker.CanConsumeExperimentalVerticalInput(1)
-            || _tracker.CanConsumeExperimentalVerticalInput(-1));
+            || _tracker.CanConsumeVerticalInputAtBoundary(1)
+            || _tracker.CanConsumeVerticalInputAtBoundary(-1));
 
     private bool HasHorizontalScrollRange =>
         _tracker.MaxPosition.X - _tracker.MinPosition.X > 0.5;
@@ -137,7 +137,7 @@ public sealed class InputElementInteractionSource : IDisposable
                     _tracker.MinPosition.Y,
                     _tracker.MaxPosition.Y,
                     PositionYChainingMode,
-                    HasVerticalChainingTarget) && !_tracker.CanConsumeExperimentalVerticalInput(translation.Y))
+                    HasVerticalChainingTarget) && !_tracker.CanConsumeVerticalInputAtBoundary(translation.Y))
             {
                 translation = translation.WithY(0);
             }
@@ -564,8 +564,8 @@ public sealed class InputElementInteractionSource : IDisposable
 
         if (_isInteracting)
         {
-            if (_tracker.HasExperimentalVerticalScroll)
-                _tracker.ExperimentalCancelScroll();
+            if (_tracker.HasVerticalScrollParticipant)
+                _tracker.CancelScroll();
             else
                 _tracker.CompleteUserManipulation();
         }
@@ -615,7 +615,7 @@ public sealed class InputElementInteractionSource : IDisposable
                 _tracker.MaxPosition.Y,
                 PositionYChainingMode,
                 HasVerticalChainingTarget)
-            && !_tracker.CanConsumeExperimentalVerticalInput(-delta.Y * ScrollInputMultiplier))
+            && !_tracker.CanConsumeVerticalInputAtBoundary(-delta.Y * ScrollInputMultiplier))
         {
             yDistance = 0;
         }
@@ -723,7 +723,7 @@ public sealed class InputElementInteractionSource : IDisposable
                                         _tracker.MaxPosition.Y,
                                         PositionYChainingMode,
                                         HasVerticalChainingTarget)
-                                    && !_tracker.CanConsumeExperimentalVerticalInput(-fingerDelta.Y * ScrollInputMultiplier);
+                                    && !_tracker.CanConsumeVerticalInputAtBoundary(-fingerDelta.Y * ScrollInputMultiplier);
 
         return xAtBoundary && yAtBoundary;
     }

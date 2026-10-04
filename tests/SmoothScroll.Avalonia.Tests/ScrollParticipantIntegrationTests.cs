@@ -8,16 +8,15 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 using SmoothScroll.Avalonia.Controls;
 using SmoothScroll.Avalonia.Interaction;
-using SmoothScroll.Avalonia.Interaction.Experimental;
 
 namespace SmoothScroll.Avalonia.Tests;
 
-public sealed class ExperimentalScrollIntegrationTests
+public sealed class ScrollParticipantIntegrationTests
 {
     [AvaloniaTheory]
     [InlineData(true)]
     [InlineData(false)]
-    public void TouchRelease_PreservesExperimentalInertia_WhileExternalCaptureLossCancels(bool normalRelease)
+    public void TouchRelease_PreservesParticipantInertia_WhileExternalCaptureLossCancels(bool normalRelease)
     {
         var viewer = new ScrollViewer
         {
@@ -32,10 +31,10 @@ public sealed class ExperimentalScrollIntegrationTests
             window.Show(); Render(window);
             var presenter = Assert.IsType<ScrollViewerPresenter>(viewer.Presenter);
             var participant = new Participant { Maximum = 8000 };
-            using var registration = presenter.AttachExperimentalVerticalScroll(tracker =>
+            using var registration = presenter.AttachVerticalScroll(tracker =>
             {
-                tracker.ConfigureExperimentalVerticalScroll(new Factory(participant));
-                return new CallbackDisposable(() => tracker.ConfigureExperimentalVerticalScroll(null));
+                tracker.ConfigureVerticalScroll(new Factory(participant));
+                return new CallbackDisposable(() => tracker.ConfigureVerticalScroll(null));
             });
             Render(window);
             var target = window.InputHitTest(new Point(40, 120))!;
@@ -100,16 +99,16 @@ public sealed class ExperimentalScrollIntegrationTests
             var canConsume = true;
             var queries = new List<double>();
             InteractionTracker? attached = null;
-            using var registration = presenter.AttachExperimentalVerticalScroll(tracker =>
+            using var registration = presenter.AttachVerticalScroll(tracker =>
             {
                 attached = tracker;
-                tracker.ConfigureExperimentalVerticalScroll(new Factory(participant), delta =>
+                tracker.ConfigureVerticalScroll(new Factory(participant), delta =>
                 {
                     Dispatcher.UIThread.VerifyAccess();
                     queries.Add(delta);
                     return canConsume;
                 });
-                return new CallbackDisposable(() => tracker.ConfigureExperimentalVerticalScroll(null));
+                return new CallbackDisposable(() => tracker.ConfigureVerticalScroll(null));
             });
             outer.Offset = new Vector(0, 200);
             inner.Offset = new Vector(0, wheelDelta < 0 ? participant.Maximum : 0);
@@ -128,7 +127,7 @@ public sealed class ExperimentalScrollIntegrationTests
             // Reset while the inner control remains visible, then remove the participant.
             outer.Offset = new Vector(0, 200); Render(window);
             var queryCount = queries.Count;
-            attached!.ConfigureExperimentalVerticalScroll(null);
+            attached!.ConfigureVerticalScroll(null);
             Render(window);
             window.MouseWheel(new Point(30, 30), new Vector(0, wheelDelta)); Render(window);
             Assert.Equal(-Math.Sign(wheelDelta), Math.Sign(outer.Offset.Y - 200));
@@ -143,16 +142,16 @@ public sealed class ExperimentalScrollIntegrationTests
         using var host = new Host();
         var delivered = new List<double>();
         var participant = new Participant { ConsumeAll = true };
-        participant.Publish = value => host.Tracker.ExperimentalDispatchToUI(() =>
+        participant.Publish = value => host.Tracker.DispatchToUI(() =>
         {
             Dispatcher.UIThread.VerifyAccess();
             delivered.Add(value);
         });
         var factory = new Factory(participant);
-        host.Tracker.ConfigureExperimentalVerticalScroll(factory);
-        host.Tracker.ExperimentalApplyVerticalDelta(10);
-        host.Tracker.ExperimentalRunOnParticipant(value => ((Participant)value).Snapshot = 20);
-        host.Tracker.ExperimentalApplyVerticalDelta(15);
+        host.Tracker.ConfigureVerticalScroll(factory);
+        host.Tracker.ApplyVerticalScrollDelta(10);
+        host.Tracker.RunOnScrollParticipant(value => ((Participant)value).Snapshot = 20);
+        host.Tracker.ApplyVerticalScrollDelta(15);
         host.Tracker.ConfigureContentBounds(new InteractionTrackerContentBounds(new Size(200, 200), new Size(200, 200), default));
         host.Render();
 
@@ -168,14 +167,14 @@ public sealed class ExperimentalScrollIntegrationTests
     {
         using var host = new Host();
         var participant = new Participant { Maximum = 200 };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(participant));
+        host.Tracker.ConfigureVerticalScroll(new Factory(participant));
         host.Tracker.TryUpdatePosition(new Vector3D(0, 150, 0));
         host.Tracker.ConfigureContentBounds(new InteractionTrackerContentBounds(new Size(100, 200), new Size(100, 100), default));
         host.Render();
         Assert.Equal(150, host.Tracker.Position.Y);
 
-        host.Tracker.ExperimentalRunOnParticipant(value => ((Participant)value).ShrinkAfterPre = true);
-        host.Tracker.ExperimentalApplyVerticalDelta(30);
+        host.Tracker.RunOnScrollParticipant(value => ((Participant)value).ShrinkAfterPre = true);
+        host.Tracker.ApplyVerticalScrollDelta(30);
         host.Render();
         var result = Assert.Single(participant.Results);
         Assert.Equal(130, result.Position);
@@ -183,7 +182,7 @@ public sealed class ExperimentalScrollIntegrationTests
         Assert.Equal(30, result.Remaining);
         Assert.Equal(30, result.PreConsumed + result.SelfConsumed + result.PostConsumed + result.Remaining);
 
-        host.Tracker.ExperimentalRunOnParticipant(value =>
+        host.Tracker.RunOnScrollParticipant(value =>
         {
             var current = (Participant)value;
             current.Maximum = 200;
@@ -191,7 +190,7 @@ public sealed class ExperimentalScrollIntegrationTests
             current.ShrinkAfterPost = true;
         });
         host.Tracker.TryUpdatePosition(new Vector3D(0, 90, 0));
-        host.Tracker.ExperimentalApplyVerticalDelta(50);
+        host.Tracker.ApplyVerticalScrollDelta(50);
         host.Render();
         result = participant.Results[1];
         Assert.Equal(100, result.Position);
@@ -204,9 +203,9 @@ public sealed class ExperimentalScrollIntegrationTests
     {
         using var host = new Host();
         var participant = new Participant { ContinueFrames = true };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(participant));
-        host.Tracker.ExperimentalApplyVerticalDelta(10);
-        host.Tracker.ExperimentalCompleteVerticalScroll();
+        host.Tracker.ConfigureVerticalScroll(new Factory(participant));
+        host.Tracker.ApplyVerticalScrollDelta(10);
+        host.Tracker.CompleteVerticalScroll();
         host.Render();
         Thread.Sleep(25);
         host.Render();
@@ -230,15 +229,15 @@ public sealed class ExperimentalScrollIntegrationTests
     {
         using var host = new Host();
         var participant = new Participant();
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(participant));
-        host.Tracker.ExperimentalRunOnParticipant(value => ((Participant)value).ContinueFrames = true);
+        host.Tracker.ConfigureVerticalScroll(new Factory(participant));
+        host.Tracker.RunOnScrollParticipant(value => ((Participant)value).ContinueFrames = true);
         host.Render();
         Thread.Sleep(25);
         host.Render();
         Assert.Equal(0, participant.IdleCount);
         Assert.Single(participant.Frames, value => value == 0);
         var previousElapsed = participant.Frames[^1];
-        host.Tracker.ExperimentalRunOnParticipant(value => ((Participant)value).Snapshot = 42);
+        host.Tracker.RunOnScrollParticipant(value => ((Participant)value).Snapshot = 42);
         host.Render();
         Assert.Single(participant.Frames, value => value == 0);
         Assert.True(participant.Frames[^1] >= previousElapsed);
@@ -257,7 +256,7 @@ public sealed class ExperimentalScrollIntegrationTests
     {
         using var host = new Host();
         var participant = new Participant { Maximum = 200 };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(participant));
+        host.Tracker.ConfigureVerticalScroll(new Factory(participant));
         var animation = host.Tracker.Compositor.CreateVector3DKeyFrameAnimation();
         animation.InsertKeyFrame(1, new Vector3D(0, 180, 0));
         animation.Duration = TimeSpan.FromMilliseconds(25);
@@ -275,8 +274,8 @@ public sealed class ExperimentalScrollIntegrationTests
     {
         using var host = new Host();
         var participant = new Participant { Maximum = 200 };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(participant));
-        host.Tracker.ExperimentalApplyVerticalDelta(20);
+        host.Tracker.ConfigureVerticalScroll(new Factory(participant));
+        host.Tracker.ApplyVerticalScrollDelta(20);
         host.Render();
         Assert.Equal(new[] { 0.0 }, participant.PositionUpdates);
         Assert.Single(participant.Results);
@@ -284,7 +283,7 @@ public sealed class ExperimentalScrollIntegrationTests
         host.Render();
         Assert.Equal(150, participant.PositionUpdates[^1]);
         Assert.Single(participant.Results);
-        host.Tracker.ExperimentalRunOnParticipant(value =>
+        host.Tracker.RunOnScrollParticipant(value =>
         {
             var current = (Participant)value;
             current.Snapshot = -1;
@@ -295,7 +294,7 @@ public sealed class ExperimentalScrollIntegrationTests
         Assert.Equal(50, host.Tracker.Position.Y);
         Assert.Equal(50, participant.PositionUpdates[^1]);
         Assert.Single(participant.Results);
-        host.Tracker.ExperimentalRunOnParticipant(value => ((Participant)value).Snapshot = -1);
+        host.Tracker.RunOnScrollParticipant(value => ((Participant)value).Snapshot = -1);
         host.Render();
         Assert.Equal(50, participant.Snapshot);
         Assert.Single(participant.Results);
@@ -307,7 +306,7 @@ public sealed class ExperimentalScrollIntegrationTests
         using var host = new Host();
         host.Tracker.MaxPosition = new Vector3D(100, 100, 0);
         var participant = new Participant { ConsumeAll = true };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(participant));
+        host.Tracker.ConfigureVerticalScroll(new Factory(participant));
         host.Tracker.ApplyWheelDelta(new Vector(25, 40), false);
         host.Render();
         Assert.Equal(25, host.Tracker.Position.X);
@@ -329,13 +328,13 @@ public sealed class ExperimentalScrollIntegrationTests
             Assert.True(presenter.IsPhysicalScrollActive);
             var attached = 0;
             var detached = 0;
-            using var registration = presenter.AttachExperimentalVerticalScroll(tracker =>
+            using var registration = presenter.AttachVerticalScroll(tracker =>
             {
                 attached++;
-                tracker.ConfigureExperimentalVerticalScroll(new Factory(new Participant()));
+                tracker.ConfigureVerticalScroll(new Factory(new Participant()));
                 return new CallbackDisposable(() =>
                 {
-                    tracker.ConfigureExperimentalVerticalScroll(null);
+                    tracker.ConfigureVerticalScroll(null);
                     detached++;
                 });
             });
@@ -352,10 +351,10 @@ public sealed class ExperimentalScrollIntegrationTests
         finally { window.Close(); }
     }
 
-    private sealed class Factory(Participant participant) : IExperimentalScrollMovementParticipantFactory
+    private sealed class Factory(Participant participant) : IScrollMovementParticipantFactory
     {
         public int CreateCount { get; private set; }
-        public IExperimentalScrollMovementParticipant Create()
+        public IScrollMovementParticipant Create()
         {
             CreateCount++;
             return participant;
@@ -368,7 +367,7 @@ public sealed class ExperimentalScrollIntegrationTests
         public void Dispose() => Interlocked.Exchange(ref _callback, null)?.Invoke();
     }
 
-    private sealed class Participant : IExperimentalScrollMovementParticipant
+    private sealed class Participant : IScrollMovementParticipant
     {
         internal double Maximum = 100;
         internal bool ShrinkAfterPre;
@@ -381,26 +380,26 @@ public sealed class ExperimentalScrollIntegrationTests
         internal int IdleCount;
         internal int CancelCount;
         internal readonly List<double> Frames = [];
-        internal readonly List<ExperimentalScrollMovementResult> Results = [];
+        internal readonly List<ScrollMovementResult> Results = [];
         internal readonly List<double> PositionUpdates = [];
-        public double PreScroll(in ExperimentalScrollMovementContext context)
+        public double PreScroll(in ScrollMovementContext context)
         {
             if (ShrinkAfterPre) Maximum = 130;
             Snapshot += context.Delta;
             return ConsumeAll ? context.Delta : 0;
         }
-        public double PostScroll(in ExperimentalScrollMovementContext context, double selfConsumed)
+        public double PostScroll(in ScrollMovementContext context, double selfConsumed)
         {
             if (ShrinkAfterPost) Maximum = 100;
             return 0;
         }
-        public ExperimentalScrollBounds GetVerticalBounds(in ExperimentalScrollMovementContext context) => new(0, Maximum);
-        public void OnScrollCompleted(in ExperimentalScrollMovementResult result)
+        public ScrollBounds GetVerticalBounds(in ScrollMovementContext context) => new(0, Maximum);
+        public void OnScrollCompleted(in ScrollMovementResult result)
         {
             Results.Add(result);
             Publish?.Invoke(Snapshot);
         }
-        public void OnIdle(ExperimentalScrollMovementSource source) => IdleCount++;
+        public void OnIdle(ScrollMovementSource source) => IdleCount++;
         public void OnPositionChanged(double position)
         {
             PositionUpdates.Add(position);
@@ -425,7 +424,7 @@ public sealed class ExperimentalScrollIntegrationTests
             Tracker = ElementComposition.GetElementVisual(_window)!.Compositor.CreateInteractionTracker(null);
             Tracker.MaxPosition = new Vector3D(0, 100, 0);
         }
-        public void Render() => ExperimentalScrollIntegrationTests.Render(_window);
+        public void Render() => ScrollParticipantIntegrationTests.Render(_window);
         public void Dispose()
         {
             Tracker.Dispose();

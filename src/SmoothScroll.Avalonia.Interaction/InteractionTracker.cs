@@ -4,7 +4,6 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Animations;
 using Avalonia.Rendering.Composition.Transport;
 using Avalonia.Threading;
-using SmoothScroll.Avalonia.Interaction.Experimental;
 
 namespace SmoothScroll.Avalonia.Interaction;
 
@@ -39,74 +38,66 @@ public partial class InteractionTracker : CompositionObject, IDisposable
         Dispatcher.UIThread.VerifyAccess();
         if (IsDisposed)
             return;
-        ConfigureExperimentalVerticalScroll(null);
+        ConfigureVerticalScroll(null);
         base.Dispose();
     }
 
     /// <summary>
-    /// Installs an experimental vertical consumer through the ordered request queue. Passing null
-    /// cancels movement and detaches it. This first-stage path clamps the body and excludes zoom,
+    /// Installs a vertical scroll participant through the ordered request queue. Passing null
+    /// cancels movement and detaches it. An attached participant clamps the body and excludes zoom,
     /// overscroll and inertia resting-value overrides. Absolute position updates bypass consumption.
     /// </summary>
     /// <param name="canConsumeAtBoundary">Optional UI-thread query for consumption outside the body.
     /// Positive DIP delta increases Offset. The query must not mutate state. Null or false preserves
     /// native boundary chaining; true lets the current tracker receive the input. This is a UI
     /// snapshot decision, not a guarantee of subsequent compositor consumption.</param>
-    public void ConfigureExperimentalVerticalScroll(IExperimentalScrollMovementParticipantFactory? factory,
+    public void ConfigureVerticalScroll(IScrollMovementParticipantFactory? factory,
         Func<double, bool>? canConsumeAtBoundary = null)
     {
         Dispatcher.UIThread.VerifyAccess();
-        QueueRequest(new ConfigureExperimentalVerticalScrollRequest(NextRequestId(), factory));
-        HasExperimentalVerticalScroll = factory is not null;
+        QueueRequest(new ConfigureVerticalScrollRequest(NextRequestId(), factory));
+        HasVerticalScrollParticipant = factory is not null;
         _canConsumeAtBoundary = factory is null ? null : canConsumeAtBoundary;
     }
 
-    internal bool CanConsumeExperimentalVerticalInput(double delta) =>
+    internal bool CanConsumeVerticalInputAtBoundary(double delta) =>
         delta != 0 && _canConsumeAtBoundary?.Invoke(delta) == true;
 
-    /// <summary>Queues a direct vertical input delta for prototype hosts (DIP).</summary>
-    public void ExperimentalApplyVerticalDelta(double delta)
+    /// <summary>Queues a direct vertical input delta for custom hosts (DIP).</summary>
+    public void ApplyVerticalScrollDelta(double delta)
     {
         if (!double.IsFinite(delta))
             throw new ArgumentOutOfRangeException(nameof(delta));
-        QueueRequest(new ExperimentalVerticalDeltaRequest(NextRequestId(), delta));
-    }
-
-    /// <summary>Queues vertical input release velocity for prototype hosts (DIP/second).</summary>
-    public void ExperimentalStartVerticalInertia(double velocity)
-    {
-        if (!double.IsFinite(velocity))
-            throw new ArgumentOutOfRangeException(nameof(velocity));
-        QueueRequest(new StartInertiaRequest(NextRequestId(), new Point(0, velocity), false));
+        QueueRequest(new VerticalScrollDeltaRequest(NextRequestId(), delta));
     }
 
     /// <summary>Cancels current input and inertia in request order, retaining the participant.</summary>
-    public void ExperimentalCancelScroll()
-        => QueueRequest(new ExperimentalCancelScrollRequest(NextRequestId()));
+    public void CancelScroll()
+        => QueueRequest(new CancelScrollRequest(NextRequestId()));
 
     /// <summary>Completes explicit host input and starts optional participant settling in request order.</summary>
-    public void ExperimentalCompleteVerticalScroll()
-        => QueueRequest(new ExperimentalCompleteScrollRequest(NextRequestId()));
+    public void CompleteVerticalScroll()
+        => QueueRequest(new CompleteVerticalScrollRequest(NextRequestId()));
 
     /// <summary>Updates the existing compositor participant in request order without replacing its state.</summary>
-    public void ExperimentalRunOnParticipant(Action<IExperimentalScrollMovementParticipant> update)
+    public void RunOnScrollParticipant(Action<IScrollMovementParticipant> update)
     {
         ArgumentNullException.ThrowIfNull(update);
-        QueueRequest(new ExperimentalParticipantUpdateRequest(NextRequestId(), update));
+        QueueRequest(new ScrollParticipantUpdateRequest(NextRequestId(), update));
     }
 
     /// <summary>
     /// Posts a captured numeric snapshot to the UI through the tracker's ordered notification queue.
     /// Call only on this tracker's compositor thread; the callback itself runs on the UI thread.
     /// </summary>
-    public void ExperimentalDispatchToUI(Action callback)
+    public void DispatchToUI(Action callback)
     {
         ArgumentNullException.ThrowIfNull(callback);
         Server.Compositor.VerifyAccess();
-        Server.DispatchExperimentalToUI(callback);
+        Server.DispatchToUI(callback);
     }
 
-    internal bool HasExperimentalVerticalScroll { get; private set; }
+    internal bool HasVerticalScrollParticipant { get; private set; }
 
     public int TryUpdatePosition(Vector3D value)
         => TryUpdatePosition(value, InteractionTrackerClampingOption.Auto);
@@ -351,11 +342,11 @@ internal record ConfigurePhysicsRequest(int RequestId, double OverscrollElastici
 
 internal record ConfigureContentBoundsRequest(int RequestId, InteractionTrackerContentBounds? Bounds) : InteractionTrackerRequest(RequestId);
 
-internal record ConfigureExperimentalVerticalScrollRequest(int RequestId, IExperimentalScrollMovementParticipantFactory? Factory) : InteractionTrackerRequest(RequestId);
-internal record ExperimentalVerticalDeltaRequest(int RequestId, double Delta) : InteractionTrackerRequest(RequestId);
-internal record ExperimentalCancelScrollRequest(int RequestId) : InteractionTrackerRequest(RequestId);
-internal record ExperimentalCompleteScrollRequest(int RequestId) : InteractionTrackerRequest(RequestId);
-internal record ExperimentalParticipantUpdateRequest(int RequestId, Action<IExperimentalScrollMovementParticipant> Update) : InteractionTrackerRequest(RequestId);
+internal record ConfigureVerticalScrollRequest(int RequestId, IScrollMovementParticipantFactory? Factory) : InteractionTrackerRequest(RequestId);
+internal record VerticalScrollDeltaRequest(int RequestId, double Delta) : InteractionTrackerRequest(RequestId);
+internal record CancelScrollRequest(int RequestId) : InteractionTrackerRequest(RequestId);
+internal record CompleteVerticalScrollRequest(int RequestId) : InteractionTrackerRequest(RequestId);
+internal record ScrollParticipantUpdateRequest(int RequestId, Action<IScrollMovementParticipant> Update) : InteractionTrackerRequest(RequestId);
 
 public static class CompositorExtensions
 {

@@ -3,10 +3,10 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Server;
 using Avalonia.Threading;
 
-namespace SmoothScroll.Avalonia.Interaction.Experimental;
+namespace SmoothScroll.Avalonia.Composition;
 
 /// <summary>
-/// Experimental compositor-owned numeric output. Reference this object in an expression
+/// Compositor-owned numeric output. Reference this object in an expression
 /// animation and read <c>output.Value</c> (or its X, Y and Z components).
 /// </summary>
 /// <remarks>

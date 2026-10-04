@@ -6,7 +6,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Rendering.Composition;
 using SmoothScroll.Avalonia.Interaction;
-using SmoothScroll.Avalonia.Interaction.Experimental;
+using SmoothScroll.Avalonia.Composition;
 
 namespace SmoothScroll.Avalonia.Tests;
 

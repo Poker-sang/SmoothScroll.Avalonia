@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Input;
 using Avalonia.Rendering.Composition.Animations;
 
@@ -75,12 +75,6 @@ internal sealed class IdleState : InteractionTrackerState
 
     internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
-        if (_interactionTracker.HasExperimentalVerticalScroll && !useInertia)
-        {
-            _interactionTracker.ApplyExperimentalHorizontalInput(delta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
-            _interactionTracker.ApplyExperimentalInput(delta.Y, Experimental.ExperimentalScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
-            return;
-        }
         if (useInertia)
         {
             _interactionTracker.ChangeState(new InertiaState(
@@ -92,13 +86,8 @@ internal sealed class IdleState : InteractionTrackerState
         }
         else
         {
-            var position = Vector3D.Clamp(
-                _interactionTracker.Position + new Vector3D(delta.X, delta.Y, 0),
-                _interactionTracker.MinPosition,
-                _interactionTracker.MaxPosition);
-            _interactionTracker.SetPosition(
-                position,
-                InteractionTrackerValuesChangedArgs.UserRequestId);
+            _interactionTracker.ApplyScrollDelta(new Vector3D(delta.X, delta.Y, 0),
+                ScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
         }
     }
 

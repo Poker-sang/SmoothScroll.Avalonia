@@ -50,23 +50,26 @@ zooming, gesture remapping, and operation lifecycle events.
 Custom `ScrollViewer` templates should use `ScrollViewerPresenter` for the `PART_ContentPresenter`
 part. `ScrollPresenter` provides the physical scrolling semantics used by `ScrollView`.
 
-### Experimental compositor participants
+### Compositor scroll participants
 
-The opt-in vertical protocol in `SmoothScroll.Avalonia.Interaction.Experimental` runs numeric
+The opt-in vertical protocol in `SmoothScroll.Avalonia.Interaction` runs numeric
 participants on the compositor. Deltas and offsets use DIP; inertia velocities use DIP/second.
 Positive input increases the scroll offset. Each input transaction runs pre-consumption, the
 clamped body movement, then post-consumption, and reports their actual consumption and remainder.
-Ordinary scrolling uses the existing engine when no participant is installed.
+Pointer deltas, direct wheel input and each inertia frame share the normal tracker movement
+transaction. Without a participant, pre/post consumption is zero. Horizontal and vertical motion
+commit one position together. States select input timing and animation transitions; they do not
+select a separate participant engine.
 
-`ScrollPresenter.AttachExperimentalVerticalScroll(Func<InteractionTracker, IDisposable>)`
+`ScrollPresenter.AttachVerticalScroll(Func<InteractionTracker, IDisposable>)`
 provides tracker access on the UI thread without subclassing the sealed `ScrollViewerPresenter`.
 Its callback runs only while the presenter is loaded and physically scrolling; the returned
 attachment is disposed on detachment, compositor replacement or logical scrolling activation.
 The registration can reattach after reload or a return to physical scrolling. Its attachment
-must queue `ConfigureExperimentalVerticalScroll(null)` before disposing participant outputs.
+must queue `ConfigureVerticalScroll(null)` before disposing participant outputs.
 `IsPhysicalScrollActive` distinguishes this path from logical item scrolling.
 
-`ConfigureExperimentalVerticalScroll(factory, canConsumeAtBoundary: delta => ...)` optionally
+`ConfigureVerticalScroll(factory, canConsumeAtBoundary: delta => ...)` optionally
 supplies a UI-thread query for an additional consumer when the body is at a chaining boundary.
 Positive DIP delta increases Offset. The query must not consume input or change state; it uses
 the application's current UI snapshot. Null/false preserves the normal boundary handoff;
@@ -74,10 +77,12 @@ true retains the input for this tracker. Clearing the factory also clears the qu
 It does not redistribute a partially consumed event or transfer running inertia to another tracker.
 
 Factories and participant callbacks must use numeric state, immutable configuration and compositor
-output writers, and must not access UI controls. Use `ExperimentalRunOnParticipant` for ordered
+output writers, and must not access UI controls. Use `RunOnScrollParticipant` for ordered
 configuration changes that preserve the existing participant. `GetVerticalBounds` supplies live
 body bounds before movement and after pre/post consumption; geometry corrections are independent
-of input consumption. The same bounds constrain absolute offsets and programmatic animations.
+of input consumption. The tracker derives one effective range for body movement, absolute offsets,
+programmatic animations and inertia targets. Ordinary touch/pen retains elastic dragging and bounce;
+installing a vertical participant retains the existing clamped vertical body and zoom/snap restrictions.
 `OnScrollCompleted` reports final transaction positions. `OnPositionChanged` reports committed
 absolute, animated and geometry positions, and resynchronizes configuration even when unchanged;
 it does not manufacture pre/post movement.
@@ -85,19 +90,20 @@ it does not manufacture pre/post movement.
 Actual release and completed inertia invoke `OnIdle`. Optional `OnFrame` callbacks receive seconds
 since settling began, initially zero, and continue while returning true. Idle configuration can
 request frames without invoking `OnIdle` or restarting a running clock. New input, cancellation
-and detachment stop settling. Explicit numeric hosts can use `ExperimentalApplyVerticalDelta`,
-`ExperimentalStartVerticalInertia`, `ExperimentalCompleteVerticalScroll` and
-`ExperimentalCancelScroll` through the same ordered queue. UI snapshots can be delivered through
-`ExperimentalDispatchToUI`; capture numeric values and guard owner lifetime in the UI callback.
+and detachment stop settling. Explicit numeric hosts can use `ApplyVerticalScrollDelta`,
+`CompleteVerticalScroll` and `CancelScroll` through the same ordered queue.
+Pointer release and wheel input start inertia through the normal input source.
+UI snapshots can be delivered through
+`DispatchToUI`; capture numeric values and guard owner lifetime in the UI callback.
 
-`CompositionVector3Output` and `CompositionColorOutput` expose compositor-owned `output.Value`
+`CompositionVector3Output` and `CompositionColorOutput` in `SmoothScroll.Avalonia.Composition`
+expose compositor-owned `output.Value`
 to expression animations. Their writers enforce compositor access and disposal lifetime.
-`ConfigureExperimentalContentTranslation` adds a vector output to the presenter's content
-translation. `StartAndEvaluateAnimation` evaluates an expression's initial value;
+`StartAndEvaluateAnimation` evaluates an expression's initial value;
 `CreateAnimatedSolidColorVisual` restores the missing color repaint invalidation in Avalonia
 12.1.2's native solid color visual. Detach expressions and participants before disposing outputs.
 
-This experimental vertical path excludes zoom, body overscroll and inertia resting-value snap
+An attached vertical participant excludes zoom, body overscroll and inertia resting-value snap
 overrides. Participant settling does not change the default engine or its snap-point behavior.
 
 ## ScrollView

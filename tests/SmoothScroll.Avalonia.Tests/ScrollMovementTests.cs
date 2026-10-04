@@ -3,11 +3,11 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Rendering.Composition;
 using SmoothScroll.Avalonia.Interaction;
-using SmoothScroll.Avalonia.Interaction.Experimental;
+using SmoothScroll.Avalonia.Composition;
 
 namespace SmoothScroll.Avalonia.Tests;
 
-public sealed class ExperimentalScrollMovementTests
+public sealed class ScrollMovementTests
 {
     [AvaloniaTheory]
     [InlineData(90, 30, 10, 10, 5, 5, 100)]
@@ -18,8 +18,8 @@ public sealed class ExperimentalScrollMovementTests
         using var host = new Host();
         var consumer = new Participant(pre, post);
         host.Tracker.TryUpdatePosition(new Vector3D(0, position, 0));
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(consumer));
-        host.Tracker.ExperimentalApplyVerticalDelta(requested);
+        host.Tracker.ConfigureVerticalScroll(new Factory(consumer));
+        host.Tracker.ApplyVerticalScrollDelta(requested);
         host.Render();
 
         var result = Assert.Single(consumer.Results);
@@ -38,11 +38,11 @@ public sealed class ExperimentalScrollMovementTests
     {
         using var host = new Host();
         var consumer = new Participant(0, 0) { AccumulatePre = true };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(consumer));
+        host.Tracker.ConfigureVerticalScroll(new Factory(consumer));
         const double delta = 0.07740103858055514;
         const int count = 1000;
         for (var i = 0; i < count; i++)
-            host.Tracker.ExperimentalApplyVerticalDelta(delta);
+            host.Tracker.ApplyVerticalScrollDelta(delta);
         host.Render();
 
         Assert.Equal(count, consumer.Results.Count);
@@ -62,16 +62,16 @@ public sealed class ExperimentalScrollMovementTests
     {
         using var host = new Host();
         var consumer = new Participant(0, 0);
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(consumer));
-        host.Tracker.ExperimentalApplyVerticalDelta(10);
-        host.Tracker.ExperimentalApplyVerticalDelta(15);
+        host.Tracker.ConfigureVerticalScroll(new Factory(consumer));
+        host.Tracker.ApplyVerticalScrollDelta(10);
+        host.Tracker.ApplyVerticalScrollDelta(15);
         host.Tracker.ApplyWheelDelta(new Vector(0, 20), false);
         host.Tracker.ApplyWheelDelta(new Vector(0, 25), false);
         host.Render();
 
         Assert.Equal(new[] { 10.0, 15, 20, 25 }, consumer.Results.Select(result => result.Requested));
-        Assert.Equal(new[] { ExperimentalScrollMovementSource.Direct, ExperimentalScrollMovementSource.Direct,
-            ExperimentalScrollMovementSource.Wheel, ExperimentalScrollMovementSource.Wheel },
+        Assert.Equal(new[] { ScrollMovementSource.Direct, ScrollMovementSource.Direct,
+            ScrollMovementSource.Wheel, ScrollMovementSource.Wheel },
             consumer.Results.Select(result => result.Source));
         Assert.All(consumer.Results, result =>
         {
@@ -87,13 +87,13 @@ public sealed class ExperimentalScrollMovementTests
         using var host = new Host();
         var first = new Participant(5, 0);
         var second = new Participant(0, 0);
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(first));
-        host.Tracker.ExperimentalApplyVerticalDelta(20);
+        host.Tracker.ConfigureVerticalScroll(new Factory(first));
+        host.Tracker.ApplyVerticalScrollDelta(20);
         host.Tracker.TryUpdatePosition(new Vector3D(0, 70, 0));
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(second));
-        host.Tracker.ExperimentalApplyVerticalDelta(10);
-        host.Tracker.ConfigureExperimentalVerticalScroll(null);
-        host.Tracker.ExperimentalApplyVerticalDelta(10);
+        host.Tracker.ConfigureVerticalScroll(new Factory(second));
+        host.Tracker.ApplyVerticalScrollDelta(10);
+        host.Tracker.ConfigureVerticalScroll(null);
+        host.Tracker.ApplyVerticalScrollDelta(10);
         host.Render();
 
         Assert.Single(first.Results);
@@ -110,15 +110,15 @@ public sealed class ExperimentalScrollMovementTests
     {
         using var host = new Host();
         var consumer = new Participant(0, 0) { ConsumeAllPre = true };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(consumer));
-        host.Tracker.ExperimentalStartVerticalInertia(-600);
+        host.Tracker.ConfigureVerticalScroll(new Factory(consumer));
+        host.Tracker.StartInertia(new Point(0, -600), includeScaleVelocity: false);
         host.Render();
         for (var i = 0; i < 3; i++)
         {
             Thread.Sleep(20);
             host.Render();
         }
-        host.Tracker.ExperimentalCancelScroll();
+        host.Tracker.CancelScroll();
         host.Render();
         var countAfterCancel = consumer.Results.Count;
         Thread.Sleep(30);
@@ -131,7 +131,7 @@ public sealed class ExperimentalScrollMovementTests
             Assert.Equal(0, result.SelfConsumed);
             Assert.True(result.Requested < 0);
             Assert.Equal(result.Requested, result.PreConsumed);
-            Assert.Equal(ExperimentalScrollMovementSource.Inertia, result.Source);
+            Assert.Equal(ScrollMovementSource.Inertia, result.Source);
             Assert.True(result.Velocity < 0);
             Assert.True(result.ElapsedSeconds > 0);
         });
@@ -148,7 +148,7 @@ public sealed class ExperimentalScrollMovementTests
         var baseline = host.Compositor.CreateInteractionTracker(null);
         baseline.MaxPosition = new Vector3D(0, 100, 0);
         var consumer = new Participant(0, 0);
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(consumer));
+        host.Tracker.ConfigureVerticalScroll(new Factory(consumer));
         foreach (var delta in new[] { 30.0, -10, 200, -300, 50 })
         {
             host.Tracker.ApplyWheelDelta(new Vector(0, delta), false);
@@ -156,7 +156,7 @@ public sealed class ExperimentalScrollMovementTests
             host.Render();
             Assert.Equal(baseline.Position, host.Tracker.Position);
         }
-        Assert.All(consumer.Results, result => Assert.Equal(ExperimentalScrollMovementSource.Wheel, result.Source));
+        Assert.All(consumer.Results, result => Assert.Equal(ScrollMovementSource.Wheel, result.Source));
     }
 
     [AvaloniaFact]
@@ -165,8 +165,8 @@ public sealed class ExperimentalScrollMovementTests
         using var host = new Host();
         using var output = CompositionVector3Output.Create(host.Compositor);
         var consumer = new Participant(0, 0) { ConsumeAllPre = true, Writer = output.Writer };
-        host.Tracker.ConfigureExperimentalVerticalScroll(new Factory(consumer));
-        host.Tracker.ExperimentalStartVerticalInertia(-600);
+        host.Tracker.ConfigureVerticalScroll(new Factory(consumer));
+        host.Tracker.StartInertia(new Point(0, -600), includeScaleVelocity: false);
         host.Render();
         Thread.Sleep(20);
         host.Render();
@@ -184,27 +184,27 @@ public sealed class ExperimentalScrollMovementTests
         Assert.Equal("detach", consumer.Calls[^1]);
         Assert.Single(consumer.Calls, call => call == "detach");
         Assert.True(host.Tracker.IsDisposed);
-        Assert.Throws<ObjectDisposedException>(() => host.Tracker.ExperimentalApplyVerticalDelta(1));
+        Assert.Throws<ObjectDisposedException>(() => host.Tracker.ApplyVerticalScrollDelta(1));
     }
 
-    private sealed class Factory(Participant participant) : IExperimentalScrollMovementParticipantFactory
+    private sealed class Factory(Participant participant) : IScrollMovementParticipantFactory
     {
-        public IExperimentalScrollMovementParticipant Create()
+        public IScrollMovementParticipant Create()
         {
             participant.Calls.Add("create");
             return participant;
         }
     }
 
-    private sealed class Participant(double pre, double post) : IExperimentalScrollMovementParticipant
+    private sealed class Participant(double pre, double post) : IScrollMovementParticipant
     {
         public readonly List<string> Calls = [];
-        public readonly List<ExperimentalScrollMovementResult> Results = [];
+        public readonly List<ScrollMovementResult> Results = [];
         public bool ConsumeAllPre { get; init; }
         public bool AccumulatePre { get; init; }
         public double PrePosition { get; private set; }
         public CompositionVector3OutputWriter? Writer { get; init; }
-        public double PreScroll(in ExperimentalScrollMovementContext context)
+        public double PreScroll(in ScrollMovementContext context)
         {
             Calls.Add("pre");
             if (AccumulatePre)
@@ -215,12 +215,12 @@ public sealed class ExperimentalScrollMovementTests
             }
             return ConsumeAllPre ? context.Delta : pre;
         }
-        public double PostScroll(in ExperimentalScrollMovementContext context, double selfConsumed)
+        public double PostScroll(in ScrollMovementContext context, double selfConsumed)
         {
             Calls.Add("post");
             return post;
         }
-        public void OnScrollCompleted(in ExperimentalScrollMovementResult result)
+        public void OnScrollCompleted(in ScrollMovementResult result)
         {
             Calls.Add("complete");
             Results.Add(result);

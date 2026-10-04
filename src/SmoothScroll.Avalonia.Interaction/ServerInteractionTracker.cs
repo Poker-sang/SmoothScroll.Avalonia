@@ -52,9 +52,9 @@ internal partial class ServerInteractionTracker : IDisposable
             DispatchToClient(client, action);
     }
 
-    internal void SetPosition(Vector3D newPosition, int requestId, bool notifyParticipant = true)
+    internal void SetPosition(Vector3D newPosition, int requestId, bool notifyParticipant = true, bool forceNotify = false)
     {
-        if (Position == newPosition)
+        if (Position == newPosition && !forceNotify)
             return;
         var previousY = Position.Y;
         Position = newPosition;
@@ -78,31 +78,28 @@ internal partial class ServerInteractionTracker : IDisposable
             currentPosition.Y - deltaY,
             currentPosition.Z);
 
+        if (State is InteractingState)
+        {
+            var raw = _manipulationPosition;
+            _manipulationPosition = new Vector3D(
+                raw.X - (centerPoint.X + raw.X) * (1 - scaleRatio),
+                raw.Y - (centerPoint.Y + raw.Y) * (1 - scaleRatio), raw.Z);
+        }
         Scale = newScale;
-        if (UpdateContentBounds())
-            scaledNewPosition = Vector3D.Clamp(scaledNewPosition, MinPosition, MaxPosition);
-        Position = scaledNewPosition;
+        GetPositionBounds();
+        if (_contentBounds is not null)
+            scaledNewPosition = ClampPosition(scaledNewPosition);
+        SetPosition(scaledNewPosition, requestId, forceNotify: true);
 
-        // Scale, bounds and position must agree before either inertia or rendering observes them.
+        // Scale, bounds and position agree before inertia or rendering observes them.
         if (_contentBounds is not null)
             State.ReceiveBoundsUpdate();
-
-        NotifyValuesChanged(scaledNewPosition, newScale, requestId);
-    }
-
-    private bool UpdateContentBounds()
-    {
-        if (_contentBounds is not { } bounds)
-            return false;
-
-        (MinPosition, MaxPosition) = bounds.Calculate(Scale);
-        return true;
     }
 
     private void ConfigureContentBounds(InteractionTrackerContentBounds? bounds)
     {
         _contentBounds = bounds;
-        if (!UpdateContentBounds())
+        if (bounds is null)
             return;
 
         SetPosition(ClampPosition(Position), requestId: 0);
@@ -195,44 +192,38 @@ internal partial class ServerInteractionTracker : IDisposable
             var request = reader.ReadObject();
             if (_disposed)
                 continue;
-            // The opt-in first stage is deliberately vertical and cannot mix with zoom or snap retargeting.
-            if (HasExperimentalVerticalScroll && request is TryUpdateScaleRequest or AddScaleVelocityRequest or UpdateInertiaRestingPositionRequest
-                || HasExperimentalVerticalScroll && request is StartAnimationRequest { ScaleCenterPoint: not null })
+            // Vertical participants do not support zoom or native snap retargeting.
+            if (HasScrollParticipant && request is TryUpdateScaleRequest or AddScaleVelocityRequest or UpdateInertiaRestingPositionRequest
+                || HasScrollParticipant && request is StartAnimationRequest { ScaleCenterPoint: not null })
             {
                 NotifyRequestIgnored(((InteractionTrackerRequest)request).RequestId);
                 continue;
             }
             switch (request)
             {
-                case ConfigureExperimentalVerticalScrollRequest configureMovement:
-                    ConfigureExperimentalVerticalScroll(configureMovement.Factory);
+                case ConfigureVerticalScrollRequest configureMovement:
+                    ConfigureVerticalScroll(configureMovement.Factory);
                     break;
-                case ExperimentalCancelScrollRequest:
-                    CancelExperimentalScroll();
+                case CancelScrollRequest:
+                    CancelScroll();
                     break;
-                case ExperimentalCompleteScrollRequest:
+                case CompleteVerticalScrollRequest:
                     State.CancelMovement();
-                    NotifyExperimentalIdle(Experimental.ExperimentalScrollMovementSource.Direct);
+                    NotifyScrollIdle(ScrollMovementSource.Direct);
                     break;
-                case ExperimentalParticipantUpdateRequest update:
+                case ScrollParticipantUpdateRequest update:
                     if (_movementParticipant is { } participant)
                     {
                         update.Update(participant);
                         SetPosition(ClampPosition(Position), update.RequestId, notifyParticipant: false);
                         participant.OnPositionChanged(Position.Y);
-                        EnsureExperimentalParticipantFrames();
+                        EnsureParticipantFrames();
                     }
                     break;
-                case ExperimentalVerticalDeltaRequest directMovement:
-                    if (HasExperimentalVerticalScroll)
-                    {
-                        CancelExperimentalInertiaForInput();
-                        ApplyExperimentalInput(directMovement.Delta, Experimental.ExperimentalScrollMovementSource.Direct, InteractionTrackerValuesChangedArgs.UserRequestId);
-                    }
-                    else
-                    {
-                        State.ApplyWheelDelta(new Vector(0, directMovement.Delta), false);
-                    }
+                case VerticalScrollDeltaRequest directMovement:
+                    PrepareForScrollInput(useInertia: false);
+                    ApplyScrollDelta(new Vector3D(0, directMovement.Delta, 0), ScrollMovementSource.Direct,
+                        InteractionTrackerValuesChangedArgs.UserRequestId);
                     break;
                 case TryUpdatePositionRequest tryUpdatePositionRequest:
                     _participantFrameClock?.Stop();
@@ -246,11 +237,8 @@ internal partial class ServerInteractionTracker : IDisposable
                         tryUpdateScaleRequest.RequestId);
                     break;
                 case BeginUserManipulationRequest beginUserManipulationRequest:
-                    if (HasExperimentalVerticalScroll)
-                    {
-                        _participantFrameClock?.Stop();
-                        _movementParticipant!.OnCancelled();
-                    }
+                    _participantFrameClock?.Stop();
+                    _movementParticipant?.OnCancelled();
                     State.BeginUserManipulation(beginUserManipulationRequest.Position, beginUserManipulationRequest.Pointer);
                     break;
                 case CompleteManipulationRequest completeManipulationRequest:
@@ -263,7 +251,7 @@ internal partial class ServerInteractionTracker : IDisposable
                     _participantFrameClock?.Stop();
                     State.StartInertia(
                         startInertiaRequest.LinearVelocity,
-                        !HasExperimentalVerticalScroll && startInertiaRequest.IncludeScaleVelocity);
+                        !HasScrollParticipant && startInertiaRequest.IncludeScaleVelocity);
                     break;
                 case AddScaleVelocityRequest addScaleVelocityRequest:
                     State.AddScaleVelocity(
@@ -272,13 +260,7 @@ internal partial class ServerInteractionTracker : IDisposable
                         addScaleVelocityRequest.UseInertia);
                     break;
                 case ApplyWheelDeltaRequest applyWheelDeltaRequest:
-                    if (HasExperimentalVerticalScroll && !applyWheelDeltaRequest.UseInertia)
-                        CancelExperimentalInertiaForInput();
-                    else if (HasExperimentalVerticalScroll && _participantFrameClock?.IsRunning == true)
-                    {
-                        _participantFrameClock.Stop();
-                        _movementParticipant!.OnCancelled();
-                    }
+                    PrepareForScrollInput(applyWheelDeltaRequest.UseInertia);
                     State.ApplyWheelDelta(
                         applyWheelDeltaRequest.Delta,
                         applyWheelDeltaRequest.UseInertia);
