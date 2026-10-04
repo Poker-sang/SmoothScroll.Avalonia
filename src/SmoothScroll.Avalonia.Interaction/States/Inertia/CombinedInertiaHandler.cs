@@ -114,10 +114,7 @@ internal sealed class CombinedInertiaHandler(
     public void DisableOverscroll()
     {
         _allowOverscroll = false;
-        var clampedPosition = Vector3D.Clamp(
-            interactionTracker.Position,
-            interactionTracker.MinPosition,
-            interactionTracker.MaxPosition);
+        var clampedPosition = interactionTracker.ClampPosition(interactionTracker.Position);
         interactionTracker.SetPosition(clampedPosition, InteractionTrackerValuesChangedArgs.UserRequestId);
     }
 
@@ -129,6 +126,12 @@ internal sealed class CombinedInertiaHandler(
             delta.X is 0 ? PositionVelocity.X : 0,
             delta.Y is 0 ? PositionVelocity.Y : 0,
             0);
+        if (interactionTracker.HasExperimentalVerticalScroll)
+        {
+            interactionTracker.ApplyExperimentalHorizontalInput(delta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
+            interactionTracker.ApplyExperimentalInput(delta.Y, Experimental.ExperimentalScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
+            return;
+        }
         var position = Vector3D.Clamp(
             interactionTracker.Position + new Vector3D(delta.X, delta.Y, 0),
             interactionTracker.MinPosition,
@@ -170,15 +173,13 @@ internal sealed class CombinedInertiaHandler(
         if (!HasCompleted())
             return;
 
-        var finalPosition = Vector3D.Clamp(
-            interactionTracker.Position,
-            interactionTracker.MinPosition,
-            interactionTracker.MaxPosition);
+        var finalPosition = interactionTracker.ClampPosition(interactionTracker.Position);
         if (_modifiedRestingPosition is { } target)
             finalPosition = Vector3D.Clamp(target, interactionTracker.MinPosition, interactionTracker.MaxPosition);
         interactionTracker.SetPosition(finalPosition, requestId);
         Stop();
         interactionTracker.ChangeState(new IdleState(interactionTracker, requestId));
+        interactionTracker.NotifyExperimentalIdle(Experimental.ExperimentalScrollMovementSource.Inertia);
     }
 
     private void StepScale(double elapsed)
@@ -208,6 +209,21 @@ internal sealed class CombinedInertiaHandler(
     {
         var position = interactionTracker.Position;
         var decayRate = _modifiedPositionDecayRate ?? interactionTracker.PositionInertiaDecayRate;
+
+        if (interactionTracker.HasExperimentalVerticalScroll)
+        {
+            (var horizontalPosition, var horizontalVelocity) = StepAxis(position.X, PositionVelocity.X,
+                interactionTracker.MinPosition.X, interactionTracker.MaxPosition.X, decayRate.X, elapsed);
+            interactionTracker.SetPosition(new Vector3D(horizontalPosition, position.Y, position.Z), requestId);
+            var velocity = PositionVelocity.Y;
+            var delta = GetDecayedDisplacement(velocity, decayRate.Y, elapsed);
+            var consumed = interactionTracker.ApplyExperimentalVerticalMovement(delta, velocity, elapsed,
+                Experimental.ExperimentalScrollMovementSource.Inertia, requestId);
+            // The external consumer can move while the body's offset stays at either boundary.
+            // Continue the same decay while any stage consumes movement; an exhausted chain stops it.
+            PositionVelocity = new Vector3D(horizontalVelocity, consumed == 0 ? 0 : velocity * GetFrameDecay(decayRate.Y, elapsed), 0);
+            return;
+        }
 
         (var x, var velocityX) = StepAxis(
             position.X,
@@ -268,10 +284,7 @@ internal sealed class CombinedInertiaHandler(
 
     private bool HasCompleted()
     {
-        var clamped = Vector3D.Clamp(
-            interactionTracker.Position,
-            interactionTracker.MinPosition,
-            interactionTracker.MaxPosition);
+        var clamped = interactionTracker.ClampPosition(interactionTracker.Position);
         var atBoundary = Vector3D.Distance(interactionTracker.Position, clamped) <= BoundaryTolerance;
         return PositionVelocity.Length <= PositionStopVelocity
                && Math.Abs(ScaleVelocity) <= ScaleStopVelocity

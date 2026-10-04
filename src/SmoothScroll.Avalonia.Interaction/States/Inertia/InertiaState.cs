@@ -47,6 +47,12 @@ internal sealed class InertiaState : InteractionTrackerState
     {
     }
 
+    internal override void CancelMovement()
+    {
+        _handler.Stop();
+        base.CancelMovement();
+    }
+
     internal override void AddScaleVelocity(Point origin, double delta, bool useInertia)
     {
         if (delta <= 0 || !double.IsFinite(delta))
@@ -108,7 +114,7 @@ internal sealed class InertiaState : InteractionTrackerState
     {
         _handler.Stop();
         if (option is InteractionTrackerClampingOption.Auto)
-            value = Vector3D.Clamp(value, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+            value = _interactionTracker.ClampPosition(value);
 
         _interactionTracker.SetPosition(value, requestId);
         _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId));

@@ -611,6 +611,8 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        _experimentalPresenterLoaded = false;
+        UpdateExperimentalAttachment();
         var compositionVisual = GetCompositionVisual();
         InterruptOperations();
         SetInteractionState(ScrollingInteractionState.Idle);
@@ -621,7 +623,9 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     protected override void OnLoaded(RoutedEventArgs e)
     {
+        _experimentalPresenterLoaded = true;
         Initialize();
+        UpdateExperimentalAttachment();
         base.OnLoaded(e);
     }
 
@@ -682,6 +686,7 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
     private void DisposeInteractionTracker()
     {
+        _experimentalAttachment?.Detach();
         InterruptOperations();
         SetInteractionState(ScrollingInteractionState.Idle);
         _interactionSource?.Dispose();
@@ -1075,14 +1080,28 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
         }
         else if (change.Property == ExtentProperty)
         {
-            OnExtentChanged(change.GetNewValue<Size>());
-            if (!_scaleChanged)
-                CoerceValue(OffsetProperty);
+            var previousCompositionUpdate = _compositionUpdate;
+            try
+            {
+                // Live participant bounds own geometry correction. Native mirrors can temporarily
+                // have older viewport data; do not send their coercion back as absolute input.
+                _compositionUpdate |= _experimentalAttachment?.IsAttached == true;
+                OnExtentChanged(change.GetNewValue<Size>());
+                if (!_scaleChanged)
+                    CoerceValue(OffsetProperty);
+            }
+            finally { _compositionUpdate = previousCompositionUpdate; }
         }
         else if (change.Property == ViewportProperty)
         {
-            OnViewportChanged(change.GetNewValue<Size>());
-            CoerceValue(OffsetProperty);
+            var previousCompositionUpdate = _compositionUpdate;
+            try
+            {
+                _compositionUpdate |= _experimentalAttachment?.IsAttached == true;
+                OnViewportChanged(change.GetNewValue<Size>());
+                CoerceValue(OffsetProperty);
+            }
+            finally { _compositionUpdate = previousCompositionUpdate; }
         }
         else if (change.Property == PaddingProperty)
         {
@@ -1239,6 +1258,8 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
     {
         if (wasLogicalScrollActive == IsLogicalScrollActive)
             return;
+
+        UpdateExperimentalAttachment();
 
         var compositionVisual = GetCompositionVisual();
         ClearScrollAnimation(compositionVisual);
@@ -1912,7 +1933,8 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
         _interactionSource.PositionXSourceMode = CanHorizontallyScroll ? sourceMode : InteractionSourceMode.Disabled;
 
-        _interactionSource.PositionYSourceMode = CanVerticallyScroll ? sourceMode : InteractionSourceMode.Disabled;
+        _interactionSource.PositionYSourceMode = CanVerticallyScroll || _experimentalAttachment?.IsAttached == true
+            ? sourceMode : InteractionSourceMode.Disabled;
     }
 
     private void UpdateComputedScrollMode((Size Extent, Size ScaledExtent, Vector MinPosition, Vector MaxPosition) scrollableArea)
@@ -2052,6 +2074,11 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
         var scrollAnimation = compositionVisual.Compositor.CreateExpressionAnimation();
         scrollAnimation.Expression =
             "Vector3(Margin.X, Margin.Y, 0) - Vector3(Tracker.Position.X, Tracker.Position.Y, Tracker.Position.Z) + Vector3(this.Target.Offset.X, this.Target.Offset.Y, this.Target.Offset.Z)";
+        if (_experimentalContentTranslation is not null)
+        {
+            scrollAnimation.Expression += " + ContentTranslation.Value";
+            scrollAnimation.SetReferenceParameter("ContentTranslation", _experimentalContentTranslation);
+        }
         scrollAnimation.Target = "Translation";
         scrollAnimation.SetReferenceParameter("Tracker", _interactionTracker!);
 
@@ -2111,7 +2138,8 @@ public partial class ScrollPresenter : ContentPresenter, IScrollable, IScrollAnc
 
         _interactionSource.ScaleSourceMode = IsZoomEnabled ? sourceMode : InteractionSourceMode.Disabled;
         _interactionSource.PositionXSourceMode = CanHorizontallyScroll ? sourceMode : InteractionSourceMode.Disabled;
-        _interactionSource.PositionYSourceMode = CanVerticallyScroll ? sourceMode : InteractionSourceMode.Disabled;
+        _interactionSource.PositionYSourceMode = CanVerticallyScroll || _experimentalAttachment?.IsAttached == true
+            ? sourceMode : InteractionSourceMode.Disabled;
         _interactionSource.GestureBindings = GestureBindings;
         _interactionSource.ScrollInputMultiplier = ScrollInputMultiplier;
         _interactionSource.ZoomInputMultiplier = ZoomInputMultiplier;

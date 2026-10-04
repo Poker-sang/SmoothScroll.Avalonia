@@ -35,6 +35,9 @@ internal abstract class InteractionTrackerState
     internal abstract void TryUpdatePosition(Vector3D value, InteractionTrackerClampingOption option, int requestId);
     internal abstract void TryUpdateScale(double scale, Vector3D centerPoint, int requestId);
 
+    internal virtual void CancelMovement() =>
+        _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId: 0));
+
     internal virtual void UpdateInertiaRestingPosition(Vector3D position, int requestId) =>
         _interactionTracker.NotifyRequestIgnored(requestId);
 

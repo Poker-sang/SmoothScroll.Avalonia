@@ -93,7 +93,9 @@ public sealed class InputElementInteractionSource : IDisposable
 
     private bool ShouldAutoScrollVertically =>
         PositionYSourceMode is not InteractionSourceMode.Disabled
-        && (HasVerticalScrollRange || !HasHorizontalScrollRange);
+        && (HasVerticalScrollRange || !HasHorizontalScrollRange
+            || _tracker.CanConsumeExperimentalVerticalInput(1)
+            || _tracker.CanConsumeExperimentalVerticalInput(-1));
 
     private bool HasHorizontalScrollRange =>
         _tracker.MaxPosition.X - _tracker.MinPosition.X > 0.5;
@@ -135,7 +137,7 @@ public sealed class InputElementInteractionSource : IDisposable
                     _tracker.MinPosition.Y,
                     _tracker.MaxPosition.Y,
                     PositionYChainingMode,
-                    HasVerticalChainingTarget))
+                    HasVerticalChainingTarget) && !_tracker.CanConsumeExperimentalVerticalInput(translation.Y))
             {
                 translation = translation.WithY(0);
             }
@@ -511,8 +513,11 @@ public sealed class InputElementInteractionSource : IDisposable
             _tracker.CompleteUserManipulation();
         }
 
-        _firstContact?.Capture(null);
+        // A normal release ends contact tracking before it relinquishes capture. Otherwise
+        // PointerCaptureLost would cancel the inertia request just queued above.
+        var releasedContact = _firstContact;
         ResetContacts();
+        releasedContact?.Capture(null);
         e.Handled = true;
     }
 
@@ -558,7 +563,12 @@ public sealed class InputElementInteractionSource : IDisposable
             return;
 
         if (_isInteracting)
-            _tracker.CompleteUserManipulation();
+        {
+            if (_tracker.HasExperimentalVerticalScroll)
+                _tracker.ExperimentalCancelScroll();
+            else
+                _tracker.CompleteUserManipulation();
+        }
 
         ResetContacts();
     }
@@ -604,7 +614,8 @@ public sealed class InputElementInteractionSource : IDisposable
                 _tracker.MinPosition.Y,
                 _tracker.MaxPosition.Y,
                 PositionYChainingMode,
-                HasVerticalChainingTarget))
+                HasVerticalChainingTarget)
+            && !_tracker.CanConsumeExperimentalVerticalInput(-delta.Y * ScrollInputMultiplier))
         {
             yDistance = 0;
         }
@@ -711,7 +722,8 @@ public sealed class InputElementInteractionSource : IDisposable
                                         _tracker.MinPosition.Y,
                                         _tracker.MaxPosition.Y,
                                         PositionYChainingMode,
-                                        HasVerticalChainingTarget);
+                                        HasVerticalChainingTarget)
+                                    && !_tracker.CanConsumeExperimentalVerticalInput(-fingerDelta.Y * ScrollInputMultiplier);
 
         return xAtBoundary && yAtBoundary;
     }

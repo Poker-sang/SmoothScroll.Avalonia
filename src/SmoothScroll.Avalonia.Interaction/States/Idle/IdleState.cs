@@ -75,6 +75,12 @@ internal sealed class IdleState : InteractionTrackerState
 
     internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
+        if (_interactionTracker.HasExperimentalVerticalScroll && !useInertia)
+        {
+            _interactionTracker.ApplyExperimentalHorizontalInput(delta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
+            _interactionTracker.ApplyExperimentalInput(delta.Y, Experimental.ExperimentalScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
+            return;
+        }
         if (useInertia)
         {
             _interactionTracker.ChangeState(new InertiaState(
@@ -112,7 +118,7 @@ internal sealed class IdleState : InteractionTrackerState
     {
         if (option == InteractionTrackerClampingOption.Auto)
         {
-            value = Vector3D.Clamp(value, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+            value = _interactionTracker.ClampPosition(value);
         }
 
         _interactionTracker.SetPosition(value, requestId);
@@ -124,7 +130,7 @@ internal sealed class IdleState : InteractionTrackerState
     internal override void ReceiveBoundsUpdate()
     {
         var position = _interactionTracker.Position;
-        var clampedPosition = Vector3D.Clamp(position, _interactionTracker.MinPosition, _interactionTracker.MaxPosition);
+        var clampedPosition = _interactionTracker.ClampPosition(position);
         _interactionTracker.SetPosition(clampedPosition, 0);
     }
 

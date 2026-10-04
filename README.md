@@ -50,6 +50,56 @@ zooming, gesture remapping, and operation lifecycle events.
 Custom `ScrollViewer` templates should use `ScrollViewerPresenter` for the `PART_ContentPresenter`
 part. `ScrollPresenter` provides the physical scrolling semantics used by `ScrollView`.
 
+### Experimental compositor participants
+
+The opt-in vertical protocol in `SmoothScroll.Avalonia.Interaction.Experimental` runs numeric
+participants on the compositor. Deltas and offsets use DIP; inertia velocities use DIP/second.
+Positive input increases the scroll offset. Each input transaction runs pre-consumption, the
+clamped body movement, then post-consumption, and reports their actual consumption and remainder.
+Ordinary scrolling uses the existing engine when no participant is installed.
+
+`ScrollPresenter.AttachExperimentalVerticalScroll(Func<InteractionTracker, IDisposable>)`
+provides tracker access on the UI thread without subclassing the sealed `ScrollViewerPresenter`.
+Its callback runs only while the presenter is loaded and physically scrolling; the returned
+attachment is disposed on detachment, compositor replacement or logical scrolling activation.
+The registration can reattach after reload or a return to physical scrolling. Its attachment
+must queue `ConfigureExperimentalVerticalScroll(null)` before disposing participant outputs.
+`IsPhysicalScrollActive` distinguishes this path from logical item scrolling.
+
+`ConfigureExperimentalVerticalScroll(factory, canConsumeAtBoundary: delta => ...)` optionally
+supplies a UI-thread query for an additional consumer when the body is at a chaining boundary.
+Positive DIP delta increases Offset. The query must not consume input or change state; it uses
+the application's current UI snapshot. Null/false preserves the normal boundary handoff;
+true retains the input for this tracker. Clearing the factory also clears the query.
+It does not redistribute a partially consumed event or transfer running inertia to another tracker.
+
+Factories and participant callbacks must use numeric state, immutable configuration and compositor
+output writers, and must not access UI controls. Use `ExperimentalRunOnParticipant` for ordered
+configuration changes that preserve the existing participant. `GetVerticalBounds` supplies live
+body bounds before movement and after pre/post consumption; geometry corrections are independent
+of input consumption. The same bounds constrain absolute offsets and programmatic animations.
+`OnScrollCompleted` reports final transaction positions. `OnPositionChanged` reports committed
+absolute, animated and geometry positions, and resynchronizes configuration even when unchanged;
+it does not manufacture pre/post movement.
+
+Actual release and completed inertia invoke `OnIdle`. Optional `OnFrame` callbacks receive seconds
+since settling began, initially zero, and continue while returning true. Idle configuration can
+request frames without invoking `OnIdle` or restarting a running clock. New input, cancellation
+and detachment stop settling. Explicit numeric hosts can use `ExperimentalApplyVerticalDelta`,
+`ExperimentalStartVerticalInertia`, `ExperimentalCompleteVerticalScroll` and
+`ExperimentalCancelScroll` through the same ordered queue. UI snapshots can be delivered through
+`ExperimentalDispatchToUI`; capture numeric values and guard owner lifetime in the UI callback.
+
+`CompositionVector3Output` and `CompositionColorOutput` expose compositor-owned `output.Value`
+to expression animations. Their writers enforce compositor access and disposal lifetime.
+`ConfigureExperimentalContentTranslation` adds a vector output to the presenter's content
+translation. `StartAndEvaluateAnimation` evaluates an expression's initial value;
+`CreateAnimatedSolidColorVisual` restores the missing color repaint invalidation in Avalonia
+12.1.2's native solid color visual. Detach expressions and participants before disposing outputs.
+
+This experimental vertical path excludes zoom, body overscroll and inertia resting-value snap
+overrides. Participant settling does not change the default engine or its snap-point behavior.
+
 ## ScrollView
 
 Add `ScrollViewDefaultTheme` to the application styles before using `ScrollView`:

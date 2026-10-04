@@ -6,7 +6,7 @@ using Avalonia.Utilities;
 
 namespace SmoothScroll.Avalonia.Interaction;
 
-internal partial class ServerInteractionTracker
+internal partial class ServerInteractionTracker : IDisposable
 {
     private int _count;
     private InteractionTrackerState? _state;
@@ -40,6 +40,8 @@ internal partial class ServerInteractionTracker
 
     public void AttachClient(InteractionTracker client)
     {
+        if (_disposed)
+            return;
         _client = client;
         Activate();
         _state ??= new IdleState(this, requestId: 0, isInitialIdleState: true);
@@ -50,12 +52,15 @@ internal partial class ServerInteractionTracker
             DispatchToClient(client, action);
     }
 
-    internal void SetPosition(Vector3D newPosition, int requestId)
+    internal void SetPosition(Vector3D newPosition, int requestId, bool notifyParticipant = true)
     {
         if (Position == newPosition)
             return;
+        var previousY = Position.Y;
         Position = newPosition;
         NotifyValuesChanged(newPosition, Scale, requestId);
+        if (notifyParticipant && previousY != newPosition.Y)
+            _movementParticipant?.OnPositionChanged(newPosition.Y);
     }
 
     internal void SetScale(double newScale, Vector3D centerPoint, int requestId)
@@ -100,7 +105,7 @@ internal partial class ServerInteractionTracker
         if (!UpdateContentBounds())
             return;
 
-        SetPosition(Vector3D.Clamp(Position, MinPosition, MaxPosition), requestId: 0);
+        SetPosition(ClampPosition(Position), requestId: 0);
         State.ReceiveBoundsUpdate();
     }
 
@@ -188,9 +193,50 @@ internal partial class ServerInteractionTracker
         for (var i = 0; i < requestCount; i++)
         {
             var request = reader.ReadObject();
+            if (_disposed)
+                continue;
+            // The opt-in first stage is deliberately vertical and cannot mix with zoom or snap retargeting.
+            if (HasExperimentalVerticalScroll && request is TryUpdateScaleRequest or AddScaleVelocityRequest or UpdateInertiaRestingPositionRequest
+                || HasExperimentalVerticalScroll && request is StartAnimationRequest { ScaleCenterPoint: not null })
+            {
+                NotifyRequestIgnored(((InteractionTrackerRequest)request).RequestId);
+                continue;
+            }
             switch (request)
             {
+                case ConfigureExperimentalVerticalScrollRequest configureMovement:
+                    ConfigureExperimentalVerticalScroll(configureMovement.Factory);
+                    break;
+                case ExperimentalCancelScrollRequest:
+                    CancelExperimentalScroll();
+                    break;
+                case ExperimentalCompleteScrollRequest:
+                    State.CancelMovement();
+                    NotifyExperimentalIdle(Experimental.ExperimentalScrollMovementSource.Direct);
+                    break;
+                case ExperimentalParticipantUpdateRequest update:
+                    if (_movementParticipant is { } participant)
+                    {
+                        update.Update(participant);
+                        SetPosition(ClampPosition(Position), update.RequestId, notifyParticipant: false);
+                        participant.OnPositionChanged(Position.Y);
+                        EnsureExperimentalParticipantFrames();
+                    }
+                    break;
+                case ExperimentalVerticalDeltaRequest directMovement:
+                    if (HasExperimentalVerticalScroll)
+                    {
+                        CancelExperimentalInertiaForInput();
+                        ApplyExperimentalInput(directMovement.Delta, Experimental.ExperimentalScrollMovementSource.Direct, InteractionTrackerValuesChangedArgs.UserRequestId);
+                    }
+                    else
+                    {
+                        State.ApplyWheelDelta(new Vector(0, directMovement.Delta), false);
+                    }
+                    break;
                 case TryUpdatePositionRequest tryUpdatePositionRequest:
+                    _participantFrameClock?.Stop();
+                    _movementParticipant?.OnCancelled();
                     State.TryUpdatePosition(tryUpdatePositionRequest.Position, tryUpdatePositionRequest.ClampingOption, tryUpdatePositionRequest.RequestId);
                     break;
                 case TryUpdateScaleRequest tryUpdateScaleRequest:
@@ -200,6 +246,11 @@ internal partial class ServerInteractionTracker
                         tryUpdateScaleRequest.RequestId);
                     break;
                 case BeginUserManipulationRequest beginUserManipulationRequest:
+                    if (HasExperimentalVerticalScroll)
+                    {
+                        _participantFrameClock?.Stop();
+                        _movementParticipant!.OnCancelled();
+                    }
                     State.BeginUserManipulation(beginUserManipulationRequest.Position, beginUserManipulationRequest.Pointer);
                     break;
                 case CompleteManipulationRequest completeManipulationRequest:
@@ -209,9 +260,10 @@ internal partial class ServerInteractionTracker
                     State.ApplyManipulationDelta(applyManipulationDeltaRequest.TranslationDelta);
                     break;
                 case StartInertiaRequest startInertiaRequest:
+                    _participantFrameClock?.Stop();
                     State.StartInertia(
                         startInertiaRequest.LinearVelocity,
-                        startInertiaRequest.IncludeScaleVelocity);
+                        !HasExperimentalVerticalScroll && startInertiaRequest.IncludeScaleVelocity);
                     break;
                 case AddScaleVelocityRequest addScaleVelocityRequest:
                     State.AddScaleVelocity(
@@ -220,6 +272,13 @@ internal partial class ServerInteractionTracker
                         addScaleVelocityRequest.UseInertia);
                     break;
                 case ApplyWheelDeltaRequest applyWheelDeltaRequest:
+                    if (HasExperimentalVerticalScroll && !applyWheelDeltaRequest.UseInertia)
+                        CancelExperimentalInertiaForInput();
+                    else if (HasExperimentalVerticalScroll && _participantFrameClock?.IsRunning == true)
+                    {
+                        _participantFrameClock.Stop();
+                        _movementParticipant!.OnCancelled();
+                    }
                     State.ApplyWheelDelta(
                         applyWheelDeltaRequest.Delta,
                         applyWheelDeltaRequest.UseInertia);
@@ -230,6 +289,8 @@ internal partial class ServerInteractionTracker
                         updateInertiaRestingPositionRequest.RequestId);
                     break;
                 case StartAnimationRequest startAnimationRequest:
+                    _participantFrameClock?.Stop();
+                    _movementParticipant?.OnCancelled();
                     State.StartAnimation(
                         startAnimationRequest.Animation,
                         startAnimationRequest.RequestId,

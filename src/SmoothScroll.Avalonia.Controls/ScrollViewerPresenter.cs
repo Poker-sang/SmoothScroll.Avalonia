@@ -144,6 +144,11 @@ public sealed class ScrollViewerPresenter : ScrollPresenter
         DetachFromScrollViewer();
         _owner = owner;
 
+        // The presenter can finish its first layout before Loaded discovers the owner.
+        // Publish geometry before the offset binding is connected so native coercion sees its range.
+        owner.Extent = Extent;
+        owner.Viewport = Viewport;
+
         // Custom ScrollViewer themes may omit the semantic setters used by the bundled theme.
         var subscriptionDisposables = new IDisposable?[]
         {

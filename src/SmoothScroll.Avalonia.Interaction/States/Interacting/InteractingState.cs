@@ -44,10 +44,7 @@ internal sealed class InteractingState : InteractionTrackerState
 
     internal override void CompleteUserManipulation()
     {
-        var clampedPosition = Vector3D.Clamp(
-            _interactionTracker.Position,
-            _interactionTracker.MinPosition,
-            _interactionTracker.MaxPosition);
+        var clampedPosition = _interactionTracker.ClampPosition(_interactionTracker.Position);
         if (_interactionTracker.Position != clampedPosition)
         {
             _interactionTracker.ChangeState(new InertiaState(
@@ -61,6 +58,7 @@ internal sealed class InteractingState : InteractionTrackerState
         }
 
         _interactionTracker.ChangeState(new IdleState(_interactionTracker, requestId: 0));
+        _interactionTracker.NotifyExperimentalIdle(Experimental.ExperimentalScrollMovementSource.Direct);
     }
 
     internal override void AddScaleVelocity(Point origin, double scaleDelta, bool useInertia)
@@ -119,6 +117,13 @@ internal sealed class InteractingState : InteractionTrackerState
 
     internal override void ApplyManipulationDelta(Vector translationDelta)
     {
+        if (_interactionTracker.HasExperimentalVerticalScroll)
+        {
+            _interactionTracker.ApplyExperimentalHorizontalInput(translationDelta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
+            _interactionTracker.ApplyExperimentalInput(translationDelta.Y, Experimental.ExperimentalScrollMovementSource.Direct, InteractionTrackerValuesChangedArgs.UserRequestId);
+            _position = _interactionTracker.Position;
+            return;
+        }
         _position += new Vector3D((float)translationDelta.X, (float)translationDelta.Y, 0);
         UpdateTrackerPosition(_position);
     }
@@ -194,6 +199,13 @@ internal sealed class InteractingState : InteractionTrackerState
 
     internal override void ApplyWheelDelta(Vector delta, bool useInertia)
     {
+        if (_interactionTracker.HasExperimentalVerticalScroll && !useInertia)
+        {
+            _interactionTracker.ApplyExperimentalHorizontalInput(delta.X, InteractionTrackerValuesChangedArgs.UserRequestId);
+            _interactionTracker.ApplyExperimentalInput(delta.Y, Experimental.ExperimentalScrollMovementSource.Wheel, InteractionTrackerValuesChangedArgs.UserRequestId);
+            _position = _interactionTracker.Position;
+            return;
+        }
         if (useInertia)
         {
             // Wheel input can arrive before the pointer release reaches the composition thread.

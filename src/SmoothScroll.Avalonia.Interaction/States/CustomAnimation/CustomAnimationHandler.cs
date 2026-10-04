@@ -110,10 +110,7 @@ internal sealed class PositionAnimationHandler : CustomAnimationHandler
 
     protected override void Evaluate(ExpressionVariant animationValue)
     {
-        var position = Vector3D.Clamp(
-            animationValue.Vector3D,
-            InteractionTracker.MinPosition,
-            InteractionTracker.MaxPosition);
+        var position = InteractionTracker.ClampPosition(animationValue.Vector3D);
         InteractionTracker.SetPosition(position, RequestId);
     }
 }
