@@ -24,11 +24,13 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <PackageId>SmoothScroll.Avalonia</PackageId>
-    <Description>Scrolling, panning and zooming smoothly in Avalonia</Description>
+    <PackageId>Shirasagi0012.SmoothScroll.Avalonia</PackageId>
+    <Description>A fork adding features needed for Material3Expressive.Avalonia; Scrolling, panning and zooming smoothly in Avalonia</Description>
     <PackageTags>Avalonia;Smooth;Scroll;ScrollView;ScrollViewer;Pan;Zoom;Control;Xaml</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/zxbmmmmmmmmm/SmoothScroll.Avalonia</RepositoryUrl>
+    <RepositoryUrl>https://github.com/Shirasagi0012/SmoothScroll.Avalonia</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/Shirasagi0012/SmoothScroll.Avalonia</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 

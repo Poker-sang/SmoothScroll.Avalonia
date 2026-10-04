@@ -1,11 +1,14 @@
-name: Publish NuGet Package
+name: Publish to GitHub Packages
 
 on:
+    push:
+        tags:
+            - "v[0-9]*"
     workflow_dispatch:
         inputs:
-            git_tag:
-                description: Optional git tag to build and publish. Leave empty to use the latest version tag.
-                required: false
+            package_version:
+                description: Package version for the selected branch, e.g. 0.1.0-alpha.1 (no build metadata).
+                required: true
                 type: string
 
 permissions:
@@ -15,52 +18,42 @@ env:
     CONTROLS_PROJECT_PATH: src/SmoothScroll.Avalonia.Controls/SmoothScroll.Avalonia.Controls.csproj
     INTERACTION_PROJECT_PATH: src/SmoothScroll.Avalonia.Interaction/SmoothScroll.Avalonia.Interaction.csproj
     PACKAGE_OUTPUT_DIR: artifacts/nuget
-    NUGET_SOURCE: https://api.nuget.org/v3/index.json
+    NUGET_SOURCE: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
 
 jobs:
     publish:
         runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
 
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
-                  fetch-tags: true
 
-            - name: Resolve tag and derive package version
+            - name: Resolve package version
               shell: bash
+              env:
+                  REQUESTED_VERSION: ${{ inputs.package_version }}
               run: |
                   set -euo pipefail
 
-                  resolved_tag="${{ inputs.git_tag }}"
-
-                  if [[ -z "$resolved_tag" ]]; then
-                    resolved_tag="$(git tag --sort=-v:refname | head -n 1)"
+                  if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+                    version="${GITHUB_REF_NAME#v}"
+                  else
+                    version="$REQUESTED_VERSION"
                   fi
 
-                  if [[ -z "$resolved_tag" ]]; then
-                    echo "No git tags were found. Provide a tag manually or create a version tag first."
+                  numeric='(0|[1-9][0-9]*)'
+                  identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+                  version_pattern="^$numeric\.$numeric\.$numeric(-$identifier(\.$identifier)*)?$"
+                  if [[ ! "$version" =~ $version_pattern ]]; then
+                    echo "::error::Provide a SemVer package version without build metadata, e.g. 0.1.0-alpha.1."
                     exit 1
                   fi
 
-                  git rev-parse --verify "refs/tags/$resolved_tag" >/dev/null 2>&1
-
-                  git checkout --force "$resolved_tag"
-
-                  version="$resolved_tag"
-                  version="${version#v}"
-
-                  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
-                    echo "Tag '$resolved_tag' cannot be converted to a valid NuGet version."
-                    exit 1
-                  fi
-
-                  echo "RESOLVED_TAG=$resolved_tag" >> "$GITHUB_ENV"
                   echo "PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
-
-            - name: Show resolved tag
-              run: echo "Publishing from tag ${{ env.RESOLVED_TAG }} with package version ${{ env.PACKAGE_VERSION }}"
+                  echo "Publishing $version from $GITHUB_REF at $(git rev-parse HEAD)"
 
             - name: Setup .NET
               uses: actions/setup-dotnet@v4
@@ -70,37 +63,37 @@ jobs:
                       10.0.x
 
             - name: Restore Controls
-              run: dotnet restore ${{ env.CONTROLS_PROJECT_PATH }}
-
-            - name: Restore Interaction
-              run: dotnet restore ${{ env.INTERACTION_PROJECT_PATH }}
+              run: dotnet restore "$CONTROLS_PROJECT_PATH" -p:PackageVersion="$PACKAGE_VERSION"
 
             - name: Pack Controls
               run: >
-                  dotnet pack ${{ env.CONTROLS_PROJECT_PATH }}
+                  dotnet pack "$CONTROLS_PROJECT_PATH"
                   --configuration Release
                   --no-restore
-                  -p:PackageVersion=${{ env.PACKAGE_VERSION }}
-                  --output ${{ env.PACKAGE_OUTPUT_DIR }}
+                  -p:PackageVersion="$PACKAGE_VERSION"
+                  -p:RepositoryCommit="$GITHUB_SHA"
+                  --output "$PACKAGE_OUTPUT_DIR"
 
             - name: Pack Interaction
               run: >
-                  dotnet pack ${{ env.INTERACTION_PROJECT_PATH }}
+                  dotnet pack "$INTERACTION_PROJECT_PATH"
                   --configuration Release
                   --no-restore
-                  -p:PackageVersion=${{ env.PACKAGE_VERSION }}
-                  --output ${{ env.PACKAGE_OUTPUT_DIR }}
+                  -p:PackageVersion="$PACKAGE_VERSION"
+                  -p:RepositoryCommit="$GITHUB_SHA"
+                  --output "$PACKAGE_OUTPUT_DIR"
 
             - name: Upload package artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: SmoothScroll.Avalonia.${{ env.PACKAGE_VERSION }}
+                  name: Shirasagi0012.SmoothScroll.Avalonia.${{ env.PACKAGE_VERSION }}
                   path: ${{ env.PACKAGE_OUTPUT_DIR }}/*.nupkg
                   if-no-files-found: error
 
-            - name: Push to NuGet
+            - name: Push to GitHub Packages
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: >
-                  dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIR }}/*.nupkg"
-                  --source ${{ env.NUGET_SOURCE }}
-                  --api-key ${{ secrets.NUGET_API_KEY }}
-                  --skip-duplicate
+                  dotnet nuget push "$PACKAGE_OUTPUT_DIR/*.nupkg"
+                  --source "$NUGET_SOURCE"
+                  --api-key "$GITHUB_TOKEN"

@@ -1,5 +1,7 @@
 # SmoothScroll.Avalonia
 
+A fork of https://github.com/zxbmmmmmmmmm/SmoothScroll.Avalonia
+
 [![NuGet Version](https://img.shields.io/nuget/vpre/SmoothScroll.Avalonia)](https://www.nuget.org/packages/SmoothScroll.Avalonia)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/SmoothScroll.Avalonia)](https://www.nuget.org/packages/SmoothScroll.Avalonia)
 

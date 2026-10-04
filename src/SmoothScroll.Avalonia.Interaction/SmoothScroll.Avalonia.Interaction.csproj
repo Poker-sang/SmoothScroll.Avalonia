@@ -9,11 +9,13 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>SmoothScroll.Avalonia.Interaction</PackageId>
-    <Description>InteractionTracker implementation for Avalonia</Description>
+    <PackageId>Shirasagi0012.SmoothScroll.Avalonia.Interaction</PackageId>
+    <Description>A fork adding features needed for Material3Expressive.Avalonia; InteractionTracker implementation for Avalonia</Description>
     <PackageTags>Avalonia;InteractionTracker;Interaction;Scroll;Pan;Zoom;Input;Composition</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/zxbmmmmmmmmm/SmoothScroll.Avalonia</RepositoryUrl>
+    <RepositoryUrl>https://github.com/Shirasagi0012/SmoothScroll.Avalonia</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/Shirasagi0012/SmoothScroll.Avalonia</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   
